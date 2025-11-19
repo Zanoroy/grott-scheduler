@@ -1,0 +1,74 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Database (exclude actual data, keep schema)
+database/*.db
+database/*.db-journal
+database/*.db-wal
+database/*.db-shm
+database/*.backup.*
+
+# Logs
+logs/
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Local config overrides
+config.local.ini
+*.local.*
+
+# Backup files
+*.backup
+*.bak
+*.orig
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+
+# Keep directory structure
+!logs/.gitkeep
+!workspace/.gitkeep
+!config/.gitkeep

@@ -1,0 +1,969 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grott Scheduler</title>
+    
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Bootstrap Icons -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
+    
+    <style>
+        :root {
+            --primary-color: #0d6efd;
+            --success-color: #198754;
+            --danger-color: #dc3545;
+            --warning-color: #ffc107;
+        }
+        
+        body {
+            background-color: #f8f9fa;
+        }
+        
+        .navbar {
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .card {
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            margin-bottom: 1.5rem;
+        }
+        
+        .stat-card {
+            border-left: 4px solid var(--primary-color);
+        }
+        
+        .schedule-enabled {
+            background-color: #d1e7dd;
+        }
+        
+        .schedule-disabled {
+            background-color: #f8d7da;
+        }
+        
+        .execution-success {
+            color: var(--success-color);
+        }
+        
+        .execution-failure {
+            color: var(--danger-color);
+        }
+        
+        .form-section {
+            display: none;
+        }
+        
+        .form-section.active {
+            display: block;
+        }
+        
+        .table-actions {
+            white-space: nowrap;
+        }
+        
+        .badge-schedule-type {
+            font-size: 0.8rem;
+        }
+        
+        .log-entry {
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <!-- Navbar -->
+    <nav class="navbar navbar-dark bg-dark navbar-expand-lg">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="#">
+                <i class="bi bi-calendar-check"></i> Grott Scheduler
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" onclick="showTab('dashboard')">Dashboard</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" onclick="showTab('schedules')">Schedules</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" onclick="showTab('logs')">Execution Logs</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" onclick="showTab('config')">Configuration</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid mt-4">
+        <!-- Dashboard Tab -->
+        <div id="dashboard-tab" class="tab-content">
+            <h2 class="mb-4">Dashboard</h2>
+            
+            <!-- Statistics Cards -->
+            <div class="row">
+                <div class="col-md-3">
+                    <div class="card stat-card">
+                        <div class="card-body">
+                            <h6 class="text-muted">Total Schedules</h6>
+                            <h2 id="stat-total-schedules">-</h2>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card stat-card">
+                        <div class="card-body">
+                            <h6 class="text-muted">Active Schedules</h6>
+                            <h2 id="stat-active-schedules" class="text-success">-</h2>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card stat-card">
+                        <div class="card-body">
+                            <h6 class="text-muted">Total Executions</h6>
+                            <h2 id="stat-total-executions">-</h2>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card stat-card">
+                        <div class="card-body">
+                            <h6 class="text-muted">Success Rate</h6>
+                            <h2 id="stat-success-rate" class="text-primary">-</h2>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Upcoming Schedules -->
+            <div class="card">
+                <div class="card-header">
+                    <h5><i class="bi bi-clock"></i> Upcoming Executions</h5>
+                </div>
+                <div class="card-body">
+                    <div id="upcoming-schedules"></div>
+                </div>
+            </div>
+            
+            <!-- Recent Failures -->
+            <div class="card">
+                <div class="card-header">
+                    <h5><i class="bi bi-exclamation-triangle"></i> Recent Failures</h5>
+                </div>
+                <div class="card-body">
+                    <div id="recent-failures"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Schedules Tab -->
+        <div id="schedules-tab" class="tab-content" style="display:none;">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h2>Schedules</h2>
+                <button class="btn btn-primary" onclick="showScheduleModal()">
+                    <i class="bi bi-plus-circle"></i> New Schedule
+                </button>
+            </div>
+            
+            <div class="card">
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-hover" id="schedules-table">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Type</th>
+                                    <th>Time</th>
+                                    <th>Command</th>
+                                    <th>Status</th>
+                                    <th>Last Executed</th>
+                                    <th>Success Rate</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="schedules-tbody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Execution Logs Tab -->
+        <div id="logs-tab" class="tab-content" style="display:none;">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h2>Execution Logs</h2>
+                <button class="btn btn-secondary" onclick="loadLogs()">
+                    <i class="bi bi-arrow-clockwise"></i> Refresh
+                </button>
+            </div>
+            
+            <div class="card">
+                <div class="card-body">
+                    <div id="logs-container"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Configuration Tab -->
+        <div id="config-tab" class="tab-content" style="display:none;">
+            <h2 class="mb-4">Configuration</h2>
+            
+            <div class="card">
+                <div class="card-header">
+                    <h5><i class="bi bi-gear"></i> System Configuration</h5>
+                </div>
+                <div class="card-body">
+                    <form id="config-form">
+                        <div id="config-fields"></div>
+                        <button type="submit" class="btn btn-primary mt-3">Save Configuration</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Schedule Modal -->
+    <div class="modal fade" id="scheduleModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="scheduleModalLabel">New Schedule</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="schedule-form">
+                        <input type="hidden" id="schedule-id">
+                        
+                        <!-- Basic Info -->
+                        <div class="mb-3">
+                            <label for="schedule-name" class="form-label">Schedule Name *</label>
+                            <input type="text" class="form-control" id="schedule-name" required>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="schedule-description" class="form-label">Description</label>
+                            <textarea class="form-control" id="schedule-description" rows="2"></textarea>
+                        </div>
+                        
+                        <!-- Schedule Type -->
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label for="schedule-type" class="form-label">Schedule Type *</label>
+                                <select class="form-select" id="schedule-type" onchange="updateScheduleTypeFields()" required>
+                                    <option value="daily">Daily</option>
+                                    <option value="weekly">Weekly</option>
+                                    <option value="once">Once (Specific Date)</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label for="schedule-time" class="form-label">Time *</label>
+                                <input type="time" class="form-control" id="schedule-time" required>
+                            </div>
+                        </div>
+                        
+                        <!-- Weekly Days -->
+                        <div id="weekly-days-section" class="mb-3" style="display:none;">
+                            <label class="form-label">Days of Week *</label>
+                            <div class="btn-group" role="group">
+                                <input type="checkbox" class="btn-check" id="day-0" value="0">
+                                <label class="btn btn-outline-primary" for="day-0">Mon</label>
+                                
+                                <input type="checkbox" class="btn-check" id="day-1" value="1">
+                                <label class="btn btn-outline-primary" for="day-1">Tue</label>
+                                
+                                <input type="checkbox" class="btn-check" id="day-2" value="2">
+                                <label class="btn btn-outline-primary" for="day-2">Wed</label>
+                                
+                                <input type="checkbox" class="btn-check" id="day-3" value="3">
+                                <label class="btn btn-outline-primary" for="day-3">Thu</label>
+                                
+                                <input type="checkbox" class="btn-check" id="day-4" value="4">
+                                <label class="btn btn-outline-primary" for="day-4">Fri</label>
+                                
+                                <input type="checkbox" class="btn-check" id="day-5" value="5">
+                                <label class="btn btn-outline-primary" for="day-5">Sat</label>
+                                
+                                <input type="checkbox" class="btn-check" id="day-6" value="6">
+                                <label class="btn btn-outline-primary" for="day-6">Sun</label>
+                            </div>
+                        </div>
+                        
+                        <!-- Specific Date -->
+                        <div id="specific-date-section" class="mb-3" style="display:none;">
+                            <label for="schedule-date" class="form-label">Specific Date *</label>
+                            <input type="date" class="form-control" id="schedule-date">
+                        </div>
+                        
+                        <!-- Command Type -->
+                        <div class="mb-3">
+                            <label for="command-type" class="form-label">Command Type *</label>
+                            <select class="form-select" id="command-type" onchange="updateCommandFields()" required>
+                                <option value="register">Single Register Write</option>
+                                <option value="multiregister">Multi-Register Write (Schedules)</option>
+                                <option value="template">Template</option>
+                                <option value="custom">Custom Command</option>
+                            </select>
+                        </div>
+                        
+                        <!-- Register Command -->
+                        <div id="register-section" class="form-section active">
+                            <div class="mb-3">
+                                <label for="register-select" class="form-label">Register *</label>
+                                <select class="form-select" id="register-select" onchange="updateRegisterValue()">
+                                    <option value="">Select a register...</option>
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <label for="register-value" class="form-label">Value *</label>
+                                <input type="number" class="form-control" id="register-value">
+                                <div class="form-text" id="register-help"></div>
+                            </div>
+                        </div>
+                        
+                        <!-- Multi-Register Command -->
+                        <div id="multiregister-section" class="form-section">
+                            <div class="alert alert-info">
+                                <strong>Note:</strong> For schedule registers, provide value as: StartTime-EndTime-Enable (e.g., "900-1700-1" for 9:00-17:00 enabled)
+                            </div>
+                            <div class="mb-3">
+                                <label for="multiregister-start" class="form-label">Start Register *</label>
+                                <input type="number" class="form-control" id="multiregister-start">
+                            </div>
+                            <div class="mb-3">
+                                <label for="multiregister-end" class="form-label">End Register *</label>
+                                <input type="number" class="form-control" id="multiregister-end">
+                            </div>
+                            <div class="mb-3">
+                                <label for="multiregister-value" class="form-label">Value *</label>
+                                <input type="text" class="form-control" id="multiregister-value" placeholder="900-1700-1">
+                                <div class="form-text">Format: StartTime-EndTime-Enable (e.g., 900-1700-1)</div>
+                            </div>
+                        </div>
+                        
+                        <!-- Template Command -->
+                        <div id="template-section" class="form-section">
+                            <div class="mb-3">
+                                <label for="template-select" class="form-label">Template *</label>
+                                <select class="form-select" id="template-select">
+                                    <option value="">Select a template...</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <!-- Custom Command -->
+                        <div id="custom-section" class="form-section">
+                            <div class="mb-3">
+                                <label for="custom-command" class="form-label">Custom Command (JSON) *</label>
+                                <textarea class="form-control" id="custom-command" rows="4" placeholder='{"type": "register", "register": 1044, "value": 0}'></textarea>
+                                <div class="form-text">Provide command data as JSON object</div>
+                            </div>
+                        </div>
+                        
+                        <!-- Conditional Execution -->
+                        <div class="card mb-3">
+                            <div class="card-header">
+                                <h6><i class="bi bi-filter"></i> Conditional Execution (Optional)</h6>
+                            </div>
+                            <div class="card-body">
+                                <div class="mb-3">
+                                    <label for="condition-type" class="form-label">Condition Type</label>
+                                    <select class="form-select" id="condition-type" onchange="updateConditionFields()">
+                                        <option value="none">None (Always Execute)</option>
+                                        <option value="register">Register Value Condition</option>
+                                    </select>
+                                </div>
+                                
+                                <div id="condition-fields" style="display:none;">
+                                    <div class="row">
+                                        <div class="col-md-4">
+                                            <label for="condition-register" class="form-label">Register</label>
+                                            <select class="form-select" id="condition-register">
+                                                <option value="">Select register...</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label for="condition-operator" class="form-label">Operator</label>
+                                            <select class="form-select" id="condition-operator">
+                                                <option value="<">Less Than (<)</option>
+                                                <option value=">">Greater Than (>)</option>
+                                                <option value="=">Equal (=)</option>
+                                                <option value="<=">Less Than or Equal (<=)</option>
+                                                <option value=">=">Greater Than or Equal (>=)</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label for="condition-value" class="form-label">Value</label>
+                                            <input type="number" class="form-control" id="condition-value">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Options -->
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="schedule-enabled" checked>
+                                    <label class="form-check-label" for="schedule-enabled">Enabled</label>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="pushover-enabled" checked>
+                                    <label class="form-check-label" for="pushover-enabled">Pushover Notifications on Failure</label>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="inverter-serial" class="form-label">Inverter Serial (Optional)</label>
+                            <input type="text" class="form-control" id="inverter-serial" placeholder="Leave blank for default">
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" onclick="saveSchedule()">Save Schedule</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap 5 JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <script>
+        // Configuration
+        const API_BASE_URL = 'http://<serverip>:5783/api';
+        
+        // Global data
+        let registers = [];
+        let templates = [];
+        let schedules = [];
+        let config = [];
+        
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            loadData();
+            showTab('dashboard');
+            
+            // Auto-refresh dashboard every 30 seconds
+            setInterval(() => {
+                if (document.getElementById('dashboard-tab').style.display !== 'none') {
+                    loadStats();
+                }
+            }, 30000);
+        });
+        
+        // Load all data
+        async function loadData() {
+            await Promise.all([
+                loadRegisters(),
+                loadTemplates(),
+                loadSchedules(),
+                loadConfig(),
+                loadStats(),
+                loadLogs()
+            ]);
+        }
+        
+        // Tab navigation
+        function showTab(tabName) {
+            // Hide all tabs
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.style.display = 'none';
+            });
+            
+            // Show selected tab
+            document.getElementById(tabName + '-tab').style.display = 'block';
+            
+            // Update active nav link
+            document.querySelectorAll('.navbar-nav .nav-link').forEach(link => {
+                link.classList.remove('active');
+            });
+            event.target.classList.add('active');
+            
+            // Reload data for specific tabs
+            if (tabName === 'schedules') {
+                loadSchedules();
+            } else if (tabName === 'logs') {
+                loadLogs();
+            } else if (tabName === 'dashboard') {
+                loadStats();
+            }
+        }
+        
+        // Load registers
+        async function loadRegisters() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/registers`);
+                registers = await response.json();
+                
+                // Populate register dropdowns
+                const registerSelect = document.getElementById('register-select');
+                const conditionRegister = document.getElementById('condition-register');
+                
+                registerSelect.innerHTML = '<option value="">Select a register...</option>';
+                conditionRegister.innerHTML = '<option value="">Select register...</option>';
+                
+                registers.forEach(reg => {
+                    const option = `<option value="${reg.register_number}" data-name="${reg.register_name}" data-min="${reg.value_min || ''}" data-max="${reg.value_max || ''}">${reg.register_number} - ${reg.register_name}</option>`;
+                    registerSelect.innerHTML += option;
+                    conditionRegister.innerHTML += option;
+                });
+            } catch (error) {
+                console.error('Error loading registers:', error);
+            }
+        }
+        
+        // Load templates
+        async function loadTemplates() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/templates`);
+                templates = await response.json();
+                
+                const templateSelect = document.getElementById('template-select');
+                templateSelect.innerHTML = '<option value="">Select a template...</option>';
+                
+                templates.forEach(tmpl => {
+                    templateSelect.innerHTML += `<option value="${tmpl.name}">${tmpl.name}</option>`;
+                });
+            } catch (error) {
+                console.error('Error loading templates:', error);
+            }
+        }
+        
+        // Load schedules
+        async function loadSchedules() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/schedules`);
+                schedules = await response.json();
+                
+                const tbody = document.getElementById('schedules-tbody');
+                tbody.innerHTML = '';
+                
+                schedules.forEach(schedule => {
+                    const successRate = schedule.execution_count > 0 
+                        ? Math.round((schedule.success_count / schedule.execution_count) * 100)
+                        : 0;
+                    
+                    const row = `
+                        <tr class="${schedule.enabled ? 'schedule-enabled' : 'schedule-disabled'}">
+                            <td><strong>${schedule.name}</strong><br><small class="text-muted">${schedule.description || ''}</small></td>
+                            <td><span class="badge bg-info badge-schedule-type">${schedule.schedule_type}</span></td>
+                            <td>${schedule.time}</td>
+                            <td>${schedule.command_type}</td>
+                            <td>${schedule.enabled ? '<span class="badge bg-success">Active</span>' : '<span class="badge bg-secondary">Disabled</span>'}</td>
+                            <td>${schedule.last_executed_at ? new Date(schedule.last_executed_at).toLocaleString() : 'Never'}</td>
+                            <td>${schedule.execution_count > 0 ? `${successRate}% (${schedule.success_count}/${schedule.execution_count})` : 'N/A'}</td>
+                            <td class="table-actions">
+                                <button class="btn btn-sm btn-success" onclick="executeScheduleNow(${schedule.id})" title="Execute Now">
+                                    <i class="bi bi-play-fill"></i>
+                                </button>
+                                <button class="btn btn-sm btn-primary" onclick="editSchedule(${schedule.id})" title="Edit">
+                                    <i class="bi bi-pencil"></i>
+                                </button>
+                                <button class="btn btn-sm btn-danger" onclick="deleteSchedule(${schedule.id})" title="Delete">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </td>
+                        </tr>
+                    `;
+                    tbody.innerHTML += row;
+                });
+            } catch (error) {
+                console.error('Error loading schedules:', error);
+            }
+        }
+        
+        // Load configuration
+        async function loadConfig() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/config`);
+                config = await response.json();
+                
+                const configFields = document.getElementById('config-fields');
+                configFields.innerHTML = '';
+                
+                config.forEach(item => {
+                    const field = `
+                        <div class="mb-3">
+                            <label for="config-${item.key}" class="form-label">${item.key.replace(/_/g, ' ').toUpperCase()}</label>
+                            <input type="text" class="form-control" id="config-${item.key}" value="${item.value}" data-key="${item.key}">
+                            <div class="form-text">${item.description || ''}</div>
+                        </div>
+                    `;
+                    configFields.innerHTML += field;
+                });
+            } catch (error) {
+                console.error('Error loading config:', error);
+            }
+        }
+        
+        // Save configuration
+        document.getElementById('config-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const updatedConfig = [];
+            config.forEach(item => {
+                const input = document.getElementById(`config-${item.key}`);
+                updatedConfig.push({
+                    key: item.key,
+                    value: input.value
+                });
+            });
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}/config`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(updatedConfig)
+                });
+                
+                if (response.ok) {
+                    alert('Configuration saved successfully!');
+                    loadConfig();
+                }
+            } catch (error) {
+                console.error('Error saving config:', error);
+                alert('Failed to save configuration');
+            }
+        });
+        
+        // Load statistics
+        async function loadStats() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/stats`);
+                const stats = await response.json();
+                
+                document.getElementById('stat-total-schedules').textContent = stats.total_schedules;
+                document.getElementById('stat-active-schedules').textContent = stats.active_schedules;
+                document.getElementById('stat-total-executions').textContent = stats.total_executions;
+                
+                const successRate = stats.total_executions > 0 
+                    ? Math.round((stats.successful_executions / stats.total_executions) * 100)
+                    : 0;
+                document.getElementById('stat-success-rate').textContent = successRate + '%';
+                
+                // Upcoming schedules
+                const upcomingDiv = document.getElementById('upcoming-schedules');
+                if (stats.upcoming_schedules.length > 0) {
+                    upcomingDiv.innerHTML = '<ul class="list-group">';
+                    stats.upcoming_schedules.forEach(s => {
+                        upcomingDiv.innerHTML += `
+                            <li class="list-group-item">
+                                <strong>${s.name}</strong> - ${s.schedule_type} at ${s.time}
+                                ${s.next_execution_at ? `<br><small class="text-muted">Next: ${new Date(s.next_execution_at).toLocaleString()}</small>` : ''}
+                            </li>
+                        `;
+                    });
+                    upcomingDiv.innerHTML += '</ul>';
+                } else {
+                    upcomingDiv.innerHTML = '<p class="text-muted">No upcoming schedules</p>';
+                }
+                
+                // Recent failures
+                const failuresDiv = document.getElementById('recent-failures');
+                if (stats.recent_failures.length > 0) {
+                    failuresDiv.innerHTML = '<ul class="list-group">';
+                    stats.recent_failures.forEach(f => {
+                        failuresDiv.innerHTML += `
+                            <li class="list-group-item">
+                                <strong>${f.schedule_name}</strong> - ${new Date(f.executed_at).toLocaleString()}
+                                <br><small class="text-danger">${f.error_message}</small>
+                            </li>
+                        `;
+                    });
+                    failuresDiv.innerHTML += '</ul>';
+                } else {
+                    failuresDiv.innerHTML = '<p class="text-success">No recent failures!</p>';
+                }
+            } catch (error) {
+                console.error('Error loading stats:', error);
+            }
+        }
+        
+        // Load logs
+        async function loadLogs() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/logs?limit=50`);
+                const logs = await response.json();
+                
+                const logsDiv = document.getElementById('logs-container');
+                if (logs.length > 0) {
+                    logsDiv.innerHTML = '<ul class="list-group">';
+                    logs.forEach(log => {
+                        const statusClass = log.success ? 'success' : 'danger';
+                        const statusIcon = log.success ? 'check-circle' : 'x-circle';
+                        
+                        logsDiv.innerHTML += `
+                            <li class="list-group-item log-entry">
+                                <div class="d-flex justify-content-between">
+                                    <div>
+                                        <i class="bi bi-${statusIcon} execution-${statusClass === 'success' ? 'success' : 'failure'}"></i>
+                                        <strong>${log.schedule_name}</strong>
+                                    </div>
+                                    <div class="text-muted">${new Date(log.executed_at).toLocaleString()}</div>
+                                </div>
+                                ${log.condition_details ? `<div class="text-muted"><small>Condition: ${log.condition_details}</small></div>` : ''}
+                                ${log.attempts > 1 ? `<div class="text-warning"><small>Attempts: ${log.attempts}</small></div>` : ''}
+                                ${log.error_message ? `<div class="text-danger"><small>Error: ${log.error_message}</small></div>` : ''}
+                                ${log.response ? `<div class="text-success"><small>Response: ${log.response}</small></div>` : ''}
+                            </li>
+                        `;
+                    });
+                    logsDiv.innerHTML += '</ul>';
+                } else {
+                    logsDiv.innerHTML = '<p class="text-muted">No execution logs yet</p>';
+                }
+            } catch (error) {
+                console.error('Error loading logs:', error);
+            }
+        }
+        
+        // Show schedule modal
+        function showScheduleModal(scheduleId = null) {
+            document.getElementById('schedule-form').reset();
+            document.getElementById('schedule-id').value = '';
+            document.getElementById('scheduleModalLabel').textContent = 'New Schedule';
+            updateScheduleTypeFields();
+            updateCommandFields();
+            
+            const modal = new bootstrap.Modal(document.getElementById('scheduleModal'));
+            modal.show();
+        }
+        
+        // Edit schedule
+        async function editSchedule(scheduleId) {
+            try {
+                const response = await fetch(`${API_BASE_URL}/schedules/${scheduleId}`);
+                const schedule = await response.json();
+                
+                document.getElementById('schedule-id').value = schedule.id;
+                document.getElementById('schedule-name').value = schedule.name;
+                document.getElementById('schedule-description').value = schedule.description || '';
+                document.getElementById('schedule-type').value = schedule.schedule_type;
+                document.getElementById('schedule-time').value = schedule.time;
+                document.getElementById('schedule-enabled').checked = schedule.enabled;
+                document.getElementById('pushover-enabled').checked = schedule.pushover_enabled;
+                document.getElementById('inverter-serial').value = schedule.inverter_serial || '';
+                
+                // Update schedule type fields
+                updateScheduleTypeFields();
+                
+                if (schedule.schedule_type === 'weekly' && schedule.days_of_week) {
+                    schedule.days_of_week.forEach(day => {
+                        document.getElementById(`day-${day}`).checked = true;
+                    });
+                }
+                
+                if (schedule.schedule_type === 'once') {
+                    document.getElementById('schedule-date').value = schedule.specific_date;
+                }
+                
+                // Command type
+                document.getElementById('command-type').value = schedule.command_type;
+                updateCommandFields();
+                
+                if (schedule.command_type === 'register') {
+                    document.getElementById('register-select').value = schedule.register_number;
+                    document.getElementById('register-value').value = schedule.register_value;
+                } else if (schedule.command_type === 'multiregister') {
+                    document.getElementById('multiregister-start').value = schedule.multiregister_start;
+                    document.getElementById('multiregister-end').value = schedule.multiregister_end;
+                    document.getElementById('multiregister-value').value = schedule.multiregister_value;
+                } else if (schedule.command_type === 'template') {
+                    document.getElementById('template-select').value = schedule.template_name;
+                } else if (schedule.command_type === 'custom') {
+                    document.getElementById('custom-command').value = schedule.custom_command;
+                }
+                
+                // Condition
+                document.getElementById('condition-type').value = schedule.condition_type || 'none';
+                updateConditionFields();
+                if (schedule.condition_type && schedule.condition_type !== 'none') {
+                    document.getElementById('condition-register').value = schedule.condition_register;
+                    document.getElementById('condition-operator').value = schedule.condition_operator;
+                    document.getElementById('condition-value').value = schedule.condition_value;
+                }
+                
+                document.getElementById('scheduleModalLabel').textContent = 'Edit Schedule';
+                const modal = new bootstrap.Modal(document.getElementById('scheduleModal'));
+                modal.show();
+            } catch (error) {
+                console.error('Error loading schedule:', error);
+                alert('Failed to load schedule');
+            }
+        }
+        
+        // Save schedule
+        async function saveSchedule() {
+            const scheduleId = document.getElementById('schedule-id').value;
+            const isEdit = scheduleId !== '';
+            
+            // Gather form data
+            const scheduleType = document.getElementById('schedule-type').value;
+            const commandType = document.getElementById('command-type').value;
+            
+            let daysOfWeek = null;
+            if (scheduleType === 'weekly') {
+                daysOfWeek = [];
+                for (let i = 0; i <= 6; i++) {
+                    if (document.getElementById(`day-${i}`).checked) {
+                        daysOfWeek.push(i);
+                    }
+                }
+                if (daysOfWeek.length === 0) {
+                    alert('Please select at least one day for weekly schedule');
+                    return;
+                }
+            }
+            
+            const data = {
+                name: document.getElementById('schedule-name').value,
+                description: document.getElementById('schedule-description').value,
+                schedule_type: scheduleType,
+                time: document.getElementById('schedule-time').value,
+                days_of_week: daysOfWeek,
+                specific_date: scheduleType === 'once' ? document.getElementById('schedule-date').value : null,
+                command_type: commandType,
+                register_number: commandType === 'register' ? document.getElementById('register-select').value : null,
+                register_name: commandType === 'register' ? document.getElementById('register-select').selectedOptions[0]?.dataset.name : null,
+                register_value: commandType === 'register' ? document.getElementById('register-value').value : null,
+                multiregister_start: commandType === 'multiregister' ? document.getElementById('multiregister-start').value : null,
+                multiregister_end: commandType === 'multiregister' ? document.getElementById('multiregister-end').value : null,
+                multiregister_value: commandType === 'multiregister' ? document.getElementById('multiregister-value').value : null,
+                template_name: commandType === 'template' ? document.getElementById('template-select').value : null,
+                custom_command: commandType === 'custom' ? document.getElementById('custom-command').value : null,
+                condition_type: document.getElementById('condition-type').value,
+                condition_register: document.getElementById('condition-type').value !== 'none' ? document.getElementById('condition-register').value : null,
+                condition_operator: document.getElementById('condition-type').value !== 'none' ? document.getElementById('condition-operator').value : null,
+                condition_value: document.getElementById('condition-type').value !== 'none' ? document.getElementById('condition-value').value : null,
+                enabled: document.getElementById('schedule-enabled').checked,
+                pushover_enabled: document.getElementById('pushover-enabled').checked,
+                inverter_serial: document.getElementById('inverter-serial').value || null
+            };
+            
+            try {
+                const url = isEdit ? `${API_BASE_URL}/schedules/${scheduleId}` : `${API_BASE_URL}/schedules`;
+                const method = isEdit ? 'PUT' : 'POST';
+                
+                const response = await fetch(url, {
+                    method: method,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                
+                if (response.ok) {
+                    bootstrap.Modal.getInstance(document.getElementById('scheduleModal')).hide();
+                    loadSchedules();
+                    alert(isEdit ? 'Schedule updated successfully!' : 'Schedule created successfully!');
+                } else {
+                    alert('Failed to save schedule');
+                }
+            } catch (error) {
+                console.error('Error saving schedule:', error);
+                alert('Failed to save schedule');
+            }
+        }
+        
+        // Delete schedule
+        async function deleteSchedule(scheduleId) {
+            if (!confirm('Are you sure you want to delete this schedule?')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}/schedules/${scheduleId}`, {
+                    method: 'DELETE'
+                });
+                
+                if (response.ok) {
+                    loadSchedules();
+                    alert('Schedule deleted successfully!');
+                } else {
+                    alert('Failed to delete schedule');
+                }
+            } catch (error) {
+                console.error('Error deleting schedule:', error);
+                alert('Failed to delete schedule');
+            }
+        }
+        
+        // Execute schedule now
+        async function executeScheduleNow(scheduleId) {
+            if (!confirm('Execute this schedule now?')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}/schedules/${scheduleId}/execute`, {
+                    method: 'POST'
+                });
+                
+                if (response.ok) {
+                    alert('Schedule executed! Check logs for results.');
+                    loadLogs();
+                    loadStats();
+                } else {
+                    alert('Failed to execute schedule');
+                }
+            } catch (error) {
+                console.error('Error executing schedule:', error);
+                alert('Failed to execute schedule');
+            }
+        }
+        
+        // Update schedule type fields
+        function updateScheduleTypeFields() {
+            const scheduleType = document.getElementById('schedule-type').value;
+            
+            document.getElementById('weekly-days-section').style.display = scheduleType === 'weekly' ? 'block' : 'none';
+            document.getElementById('specific-date-section').style.display = scheduleType === 'once' ? 'block' : 'none';
+        }
+        
+        // Update command fields
+        function updateCommandFields() {
+            const commandType = document.getElementById('command-type').value;
+            
+            document.querySelectorAll('.form-section').forEach(section => {
+                section.classList.remove('active');
+            });
+            
+            document.getElementById(`${commandType}-section`).classList.add('active');
+        }
+        
+        // Update register value helper
+        function updateRegisterValue() {
+            const select = document.getElementById('register-select');
+            const option = select.selectedOptions[0];
+            
+            if (option) {
+                const min = option.dataset.min;
+                const max = option.dataset.max;
+                const help = document.getElementById('register-help');
+                
+                if (min !== '' && max !== '') {
+                    help.textContent = `Valid range: ${min} - ${max}`;
+                } else {
+                    help.textContent = '';
+                }
+            }
+        }
+        
+        // Update condition fields
+        function updateConditionFields() {
+            const conditionType = document.getElementById('condition-type').value;
+            document.getElementById('condition-fields').style.display = conditionType !== 'none' ? 'block' : 'none';
+        }
+    </script>
+</body>
+</html>
