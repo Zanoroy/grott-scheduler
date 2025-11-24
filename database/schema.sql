@@ -45,10 +45,14 @@ CREATE TABLE IF NOT EXISTS schedules (
     enabled BOOLEAN DEFAULT 1,
     pushover_enabled BOOLEAN DEFAULT 1,
     inverter_serial TEXT,
+    parent_schedule_id INTEGER DEFAULT NULL,
+    execution_order INTEGER DEFAULT 0,
+    continue_on_parent_failure BOOLEAN DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     last_executed_at TIMESTAMP,
-    next_execution_at TIMESTAMP
+    next_execution_at TIMESTAMP,
+    FOREIGN KEY (parent_schedule_id) REFERENCES schedules(id) ON DELETE CASCADE
 );
 
 -- Execution logs table
@@ -64,7 +68,10 @@ CREATE TABLE IF NOT EXISTS execution_logs (
     error_message TEXT,
     condition_met BOOLEAN,
     condition_details TEXT,
-    FOREIGN KEY (schedule_id) REFERENCES schedules(id) ON DELETE SET NULL
+    parent_execution_id INTEGER DEFAULT NULL,
+    execution_order INTEGER DEFAULT 0,
+    FOREIGN KEY (schedule_id) REFERENCES schedules(id) ON DELETE SET NULL,
+    FOREIGN KEY (parent_execution_id) REFERENCES execution_logs(id) ON DELETE SET NULL
 );
 
 -- Templates table  
@@ -144,5 +151,7 @@ INSERT OR IGNORE INTO registers (register_number, name, description, write_only,
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_schedules_enabled ON schedules(enabled);
 CREATE INDEX IF NOT EXISTS idx_schedules_next_execution ON schedules(next_execution_at);
+CREATE INDEX IF NOT EXISTS idx_schedules_parent ON schedules(parent_schedule_id);
 CREATE INDEX IF NOT EXISTS idx_execution_logs_schedule_id ON execution_logs(schedule_id);
 CREATE INDEX IF NOT EXISTS idx_execution_logs_executed_at ON execution_logs(executed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_execution_logs_parent ON execution_logs(parent_execution_id);

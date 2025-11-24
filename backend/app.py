@@ -58,6 +58,8 @@ class Database:
         """Get database connection"""
         conn = sqlite3.connect(DATABASE_PATH)
         conn.row_factory = sqlite3.Row
+        # Enable foreign key constraints for CASCADE DELETE
+        conn.execute("PRAGMA foreign_keys = ON")
         return conn
     
     @staticmethod
@@ -133,7 +135,7 @@ class InverterCommand:
                 if command_data['type'] == 'read':
                     # Read register value
                     url = f"{base_url}?command=register&inverter={serial}&register={command_data['register']}"
-                    response = requests.get(url, timeout=10)
+                    response = requests.get(url, timeout=30)
                     
                     if response.status_code == 200:
                         try:
@@ -151,12 +153,12 @@ class InverterCommand:
                 elif command_data['type'] == 'register':
                     # Single register write
                     url = f"{base_url}?command=register&inverter={serial}&register={command_data['register']}&value={command_data['value']}"
-                    response = requests.put(url, timeout=10)
+                    response = requests.put(url, timeout=30)
                     
                 elif command_data['type'] == 'multiregister':
                     # Multi-register write
                     url = f"{base_url}?command=multiregister&inverter={serial}&startregister={command_data['start_register']}&endregister={command_data['end_register']}&value={command_data['value']}"
-                    response = requests.put(url, timeout=10)
+                    response = requests.put(url, timeout=30)
                     
                 elif command_data['type'] == 'custom':
                     # Custom curl command - parse and execute
@@ -202,7 +204,7 @@ class InverterCommand:
             serial = config.get('inverter_serial', 'NTCRBLR00Y')
             
             url = f"http://{host}:{port}/inverter?command=register&inverter={serial}&register={condition_register}"
-            response = requests.get(url, timeout=10)
+            response = requests.get(url, timeout=30)
             
             if response.status_code != 200:
                 return False, f"Failed to read register {condition_register}"
@@ -236,9 +238,9 @@ class ScheduleExecutor:
     """Execute scheduled tasks"""
     
     @staticmethod
-    def execute_schedule(schedule_id: int):
-        """Execute a schedule"""
-        logger.info(f"Executing schedule ID: {schedule_id}")
+    def execute_schedule(schedule_id: int, parent_execution_id: Optional[int] = None, execution_order: int = 0):
+        """Execute a schedule and its children in order"""
+        logger.info(f"Executing schedule ID: {schedule_id} (order: {execution_order})")
         
         # Get schedule details
         schedule = Database.fetch_one(
@@ -248,7 +250,7 @@ class ScheduleExecutor:
         
         if not schedule:
             logger.warning(f"Schedule {schedule_id} not found or disabled")
-            return
+            return None, False
         
         # Check condition if applicable
         condition_met = True
@@ -265,19 +267,21 @@ class ScheduleExecutor:
             if not condition_met:
                 logger.info(f"Condition not met for schedule {schedule_id}: {condition_details}")
                 # Log skipped execution
-                Database.execute(
+                cursor = Database.execute(
                     """INSERT INTO execution_logs 
-                       (schedule_id, schedule_name, command, success, attempts, condition_met, condition_details)
-                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                    (schedule_id, schedule['name'], "Skipped - condition not met", True, 0, False, condition_details)
+                       (schedule_id, schedule_name, command, success, attempts, condition_met, condition_details, 
+                        parent_execution_id, execution_order)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (schedule_id, schedule['name'], "Skipped - condition not met", True, 0, False, condition_details,
+                     parent_execution_id, execution_order)
                 )
-                return
+                return cursor.lastrowid, True
         
         # Build command
         command_data = ScheduleExecutor.build_command(schedule)
         if not command_data:
             logger.error(f"Failed to build command for schedule {schedule_id}")
-            return
+            return None, False
         
         # Execute command
         success, response, attempts = InverterCommand.execute_command(
@@ -286,14 +290,17 @@ class ScheduleExecutor:
         )
         
         # Log execution
-        Database.execute(
+        cursor = Database.execute(
             """INSERT INTO execution_logs 
-               (schedule_id, schedule_name, command, success, attempts, response, error_message, condition_met, condition_details)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (schedule_id, schedule_name, command, success, attempts, response, error_message, 
+                condition_met, condition_details, parent_execution_id, execution_order)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (schedule_id, schedule['name'], json.dumps(command_data), success, attempts,
              response if success else None, response if not success else None,
-             condition_met, condition_details)
+             condition_met, condition_details, parent_execution_id, execution_order)
         )
+        
+        execution_log_id = cursor.lastrowid
         
         # Update last executed
         Database.execute(
@@ -306,6 +313,43 @@ class ScheduleExecutor:
             ScheduleExecutor.send_pushover_notification(schedule, response, attempts)
         
         logger.info(f"Schedule {schedule_id} execution completed: {'SUCCESS' if success else 'FAILED'}")
+        
+        # Execute child schedules if parent succeeded (or if children are set to run anyway)
+        children = Database.fetch_all(
+            """SELECT * FROM schedules 
+               WHERE parent_schedule_id = ? AND enabled = 1 
+               ORDER BY execution_order ASC""",
+            (schedule_id,)
+        )
+        
+        if children:
+            logger.info(f"Found {len(children)} child schedule(s) for schedule {schedule_id}")
+            
+            for child in children:
+                # Check if we should execute this child
+                should_execute = success or child['continue_on_parent_failure']
+                
+                if should_execute:
+                    logger.info(f"Executing child schedule {child['id']} (continue_on_failure: {child['continue_on_parent_failure']})")
+                    ScheduleExecutor.execute_schedule(
+                        child['id'], 
+                        parent_execution_id=execution_log_id,
+                        execution_order=child['execution_order']
+                    )
+                else:
+                    logger.info(f"Skipping child schedule {child['id']} - parent failed and continue_on_parent_failure is disabled")
+                    # Log the skip
+                    Database.execute(
+                        """INSERT INTO execution_logs 
+                           (schedule_id, schedule_name, command, success, attempts, error_message, 
+                            parent_execution_id, execution_order)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (child['id'], child['name'], "Skipped - parent failed", False, 0,
+                         "Parent schedule failed and continue_on_parent_failure is disabled",
+                         execution_log_id, child['execution_order'])
+                    )
+        
+        return execution_log_id, success
     
     @staticmethod
     def build_command(schedule: sqlite3.Row) -> Optional[Dict]:
@@ -427,9 +471,10 @@ def manage_schedules():
         rows = Database.fetch_all("""
             SELECT s.*, 
                    (SELECT COUNT(*) FROM execution_logs WHERE schedule_id = s.id) as execution_count,
-                   (SELECT COUNT(*) FROM execution_logs WHERE schedule_id = s.id AND success = 1) as success_count
+                   (SELECT COUNT(*) FROM execution_logs WHERE schedule_id = s.id AND success = 1) as success_count,
+                   (SELECT COUNT(*) FROM schedules WHERE parent_schedule_id = s.id) as child_count
             FROM schedules s
-            ORDER BY s.created_at DESC
+            ORDER BY s.parent_schedule_id ASC, s.execution_order ASC, s.created_at DESC
         """)
         schedules = [dict(row) for row in rows]
         
@@ -453,8 +498,9 @@ def manage_schedules():
                 multiregister_start, multiregister_end, multiregister_value,
                 template_name, custom_command,
                 condition_type, condition_register, condition_operator, condition_value,
-                enabled, pushover_enabled, inverter_serial
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                enabled, pushover_enabled, inverter_serial,
+                parent_schedule_id, execution_order, continue_on_parent_failure
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             data['name'], data.get('description'), data['schedule_type'], data['time'],
             days_of_week, data.get('specific_date'),
@@ -462,13 +508,15 @@ def manage_schedules():
             data.get('multiregister_start'), data.get('multiregister_end'), data.get('multiregister_value'),
             data.get('template_name'), data.get('custom_command'),
             data.get('condition_type', 'none'), data.get('condition_register'), data.get('condition_operator'), data.get('condition_value'),
-            data.get('enabled', True), data.get('pushover_enabled', True), data.get('inverter_serial')
+            data.get('enabled', True), data.get('pushover_enabled', True), data.get('inverter_serial'),
+            data.get('parent_schedule_id'), data.get('execution_order', 0), data.get('continue_on_parent_failure', False)
         ))
         
         schedule_id = cursor.lastrowid
         
-        # Add to scheduler
-        add_schedule_to_apscheduler(schedule_id)
+        # Only add root schedules to APScheduler (children are executed by parents)
+        if not data.get('parent_schedule_id'):
+            add_schedule_to_apscheduler(schedule_id)
         
         return jsonify({'success': True, 'id': schedule_id, 'message': 'Schedule created'}), 201
 
@@ -491,6 +539,11 @@ def manage_schedule(schedule_id):
         data = request.json
         days_of_week = json.dumps(data.get('days_of_week')) if data.get('days_of_week') else None
         
+        # Get old parent_schedule_id to check if it changed
+        old_schedule = Database.fetch_one("SELECT parent_schedule_id FROM schedules WHERE id = ?", (schedule_id,))
+        old_parent_id = old_schedule['parent_schedule_id'] if old_schedule else None
+        new_parent_id = data.get('parent_schedule_id')
+        
         Database.execute("""
             UPDATE schedules SET
                 name = ?, description = ?, schedule_type = ?, time = ?, days_of_week = ?, specific_date = ?,
@@ -499,6 +552,7 @@ def manage_schedule(schedule_id):
                 template_name = ?, custom_command = ?,
                 condition_type = ?, condition_register = ?, condition_operator = ?, condition_value = ?,
                 enabled = ?, pushover_enabled = ?, inverter_serial = ?,
+                parent_schedule_id = ?, execution_order = ?, continue_on_parent_failure = ?,
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
         """, (
@@ -509,37 +563,89 @@ def manage_schedule(schedule_id):
             data.get('template_name'), data.get('custom_command'),
             data.get('condition_type', 'none'), data.get('condition_register'), data.get('condition_operator'), data.get('condition_value'),
             data.get('enabled', True), data.get('pushover_enabled', True), data.get('inverter_serial'),
+            new_parent_id, data.get('execution_order', 0), data.get('continue_on_parent_failure', False),
             schedule_id
         ))
         
-        # Remove and re-add to scheduler
-        scheduler.remove_job(f"schedule_{schedule_id}", jobstore='default')
-        add_schedule_to_apscheduler(schedule_id)
-        
-        return jsonify({'success': True, 'message': 'Schedule updated'})
-    
-    elif request.method == 'DELETE':
-        # Remove from scheduler
+        # Handle scheduler job management
+        # If changing from root to child or vice versa, update APScheduler
         try:
             scheduler.remove_job(f"schedule_{schedule_id}", jobstore='default')
         except:
             pass
         
-        # Delete from database
+        # Only add to APScheduler if it's a root schedule (no parent)
+        if not new_parent_id:
+            add_schedule_to_apscheduler(schedule_id)
+        
+        return jsonify({'success': True, 'message': 'Schedule updated'})
+    
+    elif request.method == 'DELETE':
+        # First, find all child schedules
+        children = Database.fetch_all(
+            "SELECT id FROM schedules WHERE parent_schedule_id = ?",
+            (schedule_id,)
+        )
+        
+        # Remove parent from scheduler
+        try:
+            scheduler.remove_job(f"schedule_{schedule_id}", jobstore='default')
+        except:
+            pass
+        
+        # Delete all children (which may have their own children - recursive)
+        for child in children:
+            try:
+                scheduler.remove_job(f"schedule_{child['id']}", jobstore='default')
+            except:
+                pass
+            Database.execute("DELETE FROM schedules WHERE id = ?", (child['id'],))
+        
+        # Delete parent from database
         Database.execute("DELETE FROM schedules WHERE id = ?", (schedule_id,))
         
-        return jsonify({'success': True, 'message': 'Schedule deleted'})
+        deleted_count = len(children) + 1
+        message = f"Schedule deleted" + (f" (including {len(children)} child schedule(s))" if children else "")
+        
+        return jsonify({'success': True, 'message': message, 'deleted_count': deleted_count})
 
 
 @app.route('/api/schedules/<int:schedule_id>/execute', methods=['POST'])
 def execute_schedule_now(schedule_id):
     """Manually execute a schedule immediately"""
     try:
-        ScheduleExecutor.execute_schedule(schedule_id)
-        return jsonify({'success': True, 'message': 'Schedule executed'})
+        execution_log_id, success = ScheduleExecutor.execute_schedule(schedule_id)
+        return jsonify({
+            'success': True, 
+            'message': 'Schedule executed',
+            'execution_log_id': execution_log_id,
+            'execution_success': success
+        })
     except Exception as e:
         logger.error(f"Error executing schedule {schedule_id}: {str(e)}")
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/schedules/<int:schedule_id>/children', methods=['GET'])
+def get_schedule_children(schedule_id):
+    """Get all child schedules for a given parent schedule"""
+    children = Database.fetch_all("""
+        SELECT s.*,
+               (SELECT COUNT(*) FROM execution_logs WHERE schedule_id = s.id) as execution_count,
+               (SELECT COUNT(*) FROM execution_logs WHERE schedule_id = s.id AND success = 1) as success_count
+        FROM schedules s
+        WHERE s.parent_schedule_id = ?
+        ORDER BY s.execution_order ASC
+    """, (schedule_id,))
+    
+    schedules = [dict(row) for row in children]
+    
+    # Parse JSON fields
+    for schedule in schedules:
+        if schedule.get('days_of_week'):
+            schedule['days_of_week'] = json.loads(schedule['days_of_week'])
+    
+    return jsonify(schedules)
 
 
 @app.route('/api/logs', methods=['GET'])
@@ -687,7 +793,11 @@ def initialize_scheduler():
     """Load all active schedules into APScheduler"""
     logger.info("Initializing scheduler...")
     
-    schedules = Database.fetch_all("SELECT id FROM schedules WHERE enabled = 1")
+    # Only load root schedules (those without a parent)
+    # Child schedules will be executed by their parents
+    schedules = Database.fetch_all(
+        "SELECT id FROM schedules WHERE enabled = 1 AND (parent_schedule_id IS NULL OR parent_schedule_id = 0)"
+    )
     for schedule in schedules:
         add_schedule_to_apscheduler(schedule['id'])
     
