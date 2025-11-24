@@ -305,6 +305,7 @@
                         <div class="mb-3">
                             <label for="command-type" class="form-label">Command Type *</label>
                             <select class="form-select" id="command-type" onchange="updateCommandFields()" required>
+                                <option value="read">Read Register Value</option>
                                 <option value="register">Single Register Write</option>
                                 <option value="multiregister">Multi-Register Write (Schedules)</option>
                                 <option value="template">Template</option>
@@ -312,8 +313,19 @@
                             </select>
                         </div>
                         
+                        <!-- Read Register Command -->
+                        <div id="read-section" class="form-section active">
+                            <div class="mb-3">
+                                <label for="read-register-select" class="form-label">Register to Read *</label>
+                                <select class="form-select" id="read-register-select">
+                                    <option value="">Select a register...</option>
+                                </select>
+                                <div class="form-text">Value will be read and logged at scheduled time</div>
+                            </div>
+                        </div>
+                        
                         <!-- Register Command -->
-                        <div id="register-section" class="form-section active">
+                        <div id="register-section" class="form-section">
                             <div class="mb-3">
                                 <label for="register-select" class="form-label">Register *</label>
                                 <select class="form-select" id="register-select" onchange="updateRegisterValue()">
@@ -329,21 +341,39 @@
                         
                         <!-- Multi-Register Command -->
                         <div id="multiregister-section" class="form-section">
-                            <div class="alert alert-info">
-                                <strong>Note:</strong> For schedule registers, provide value as: StartTime-EndTime-Enable (e.g., "900-1700-1" for 9:00-17:00 enabled)
+                            <div class="alert alert-warning">
+                                <strong><i class="bi bi-exclamation-triangle"></i> Important:</strong> Values must be in the format Grott expects. 
+                                <strong>YOU are responsible for hex conversion</strong> for time schedules.
+                                <br><small>
+                                    <strong>Example:</strong> For 9:00-17:00 enabled → Convert to hex: <code>0384-06a4-1</code><br>
+                                    • 9:00 (900 decimal) = 0x0384<br>
+                                    • 17:00 (1700 decimal) = 0x06a4<br>
+                                    • Enable flag = 1 (stays as 1)
+                                </small>
                             </div>
                             <div class="mb-3">
                                 <label for="multiregister-start" class="form-label">Start Register *</label>
-                                <input type="number" class="form-control" id="multiregister-start">
+                                <input type="number" class="form-control" id="multiregister-start" 
+                                       title="First register in the sequence (e.g., 1080 for Grid First Schedule 1)">
                             </div>
                             <div class="mb-3">
                                 <label for="multiregister-end" class="form-label">End Register *</label>
-                                <input type="number" class="form-control" id="multiregister-end">
+                                <input type="number" class="form-control" id="multiregister-end"
+                                       title="Last register in the sequence (e.g., 1082 for 3-register time schedule)">
                             </div>
                             <div class="mb-3">
-                                <label for="multiregister-value" class="form-label">Value *</label>
-                                <input type="text" class="form-control" id="multiregister-value" placeholder="900-1700-1">
-                                <div class="form-text">Format: StartTime-EndTime-Enable (e.g., 900-1700-1)</div>
+                                <label for="multiregister-value" class="form-label">Value * 
+                                    <i class="bi bi-info-circle" style="cursor: help;" 
+                                       title="For time schedules: Use hex format (e.g., 0384-06a4-1). For decimal values: Enter as decimal (e.g., 100). YOU must do conversions!"></i>
+                                </label>
+                                <input type="text" class="form-control" id="multiregister-value" 
+                                       placeholder="0384-06a4-1 (hex for times) or 100 (decimal)"
+                                       title="Time schedules need hex format! Example: 900 decimal = 0384 hex, 1700 decimal = 06a4 hex">
+                                <div class="form-text">
+                                    <strong>Time schedules:</strong> Use hex (e.g., <code>0384-06a4-1</code> for 9:00-17:00-enabled)<br>
+                                    <strong>Decimal values:</strong> Enter as-is (e.g., <code>100</code>)<br>
+                                    <small class="text-muted">Use online hex converter: 900 → 0x0384, 1700 → 0x06a4</small>
+                                </div>
                             </div>
                         </div>
                         
@@ -441,8 +471,8 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     
     <script>
-        // Configuration
-        const API_BASE_URL = 'http://<serverip>:5783/api';
+        // Configuration - UPDATE THIS to match your server IP
+        const API_BASE_URL = 'http://172.17.254.10:5783/api';
         
         // Global data
         let registers = [];
@@ -509,14 +539,17 @@
                 
                 // Populate register dropdowns
                 const registerSelect = document.getElementById('register-select');
+                const readRegisterSelect = document.getElementById('read-register-select');
                 const conditionRegister = document.getElementById('condition-register');
                 
                 registerSelect.innerHTML = '<option value="">Select a register...</option>';
+                readRegisterSelect.innerHTML = '<option value="">Select a register...</option>';
                 conditionRegister.innerHTML = '<option value="">Select register...</option>';
                 
                 registers.forEach(reg => {
                     const option = `<option value="${reg.register_number}" data-name="${reg.register_name}" data-min="${reg.value_min || ''}" data-max="${reg.value_max || ''}">${reg.register_number} - ${reg.register_name}</option>`;
                     registerSelect.innerHTML += option;
+                    readRegisterSelect.innerHTML += option;
                     conditionRegister.innerHTML += option;
                 });
             } catch (error) {
@@ -770,13 +803,15 @@
                 }
                 
                 // Command type
-                document.getElementById('command-type').value = schedule.command_type;
+                document.getElementById('command-type').value = schedule['command_type'];
                 updateCommandFields();
                 
-                if (schedule.command_type === 'register') {
-                    document.getElementById('register-select').value = schedule.register_number;
-                    document.getElementById('register-value').value = schedule.register_value;
-                } else if (schedule.command_type === 'multiregister') {
+                if (schedule['command_type'] === 'read') {
+                    document.getElementById('read-register-select').value = schedule['register_number'];
+                } else if (schedule['command_type'] === 'register') {
+                    document.getElementById('register-select').value = schedule['register_number'];
+                    document.getElementById('register-value').value = schedule['register_value'];
+                } else if (schedule['command_type'] === 'multiregister') {
                     document.getElementById('multiregister-start').value = schedule.multiregister_start;
                     document.getElementById('multiregister-end').value = schedule.multiregister_end;
                     document.getElementById('multiregister-value').value = schedule.multiregister_value;
@@ -835,8 +870,10 @@
                 days_of_week: daysOfWeek,
                 specific_date: scheduleType === 'once' ? document.getElementById('schedule-date').value : null,
                 command_type: commandType,
-                register_number: commandType === 'register' ? document.getElementById('register-select').value : null,
-                register_name: commandType === 'register' ? document.getElementById('register-select').selectedOptions[0]?.dataset.name : null,
+                register_number: commandType === 'read' ? document.getElementById('read-register-select').value : 
+                                 commandType === 'register' ? document.getElementById('register-select').value : null,
+                register_name: commandType === 'read' ? document.getElementById('read-register-select').selectedOptions[0]?.dataset.name :
+                               commandType === 'register' ? document.getElementById('register-select').selectedOptions[0]?.dataset.name : null,
                 register_value: commandType === 'register' ? document.getElementById('register-value').value : null,
                 multiregister_start: commandType === 'multiregister' ? document.getElementById('multiregister-start').value : null,
                 multiregister_end: commandType === 'multiregister' ? document.getElementById('multiregister-end').value : null,

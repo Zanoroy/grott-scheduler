@@ -130,7 +130,25 @@ class InverterCommand:
         
         for attempt in range(1, max_retries + 1):
             try:
-                if command_data['type'] == 'register':
+                if command_data['type'] == 'read':
+                    # Read register value
+                    url = f"{base_url}?command=register&inverter={serial}&register={command_data['register']}"
+                    response = requests.get(url, timeout=10)
+                    
+                    if response.status_code == 200:
+                        try:
+                            data = response.json()
+                            value = data.get('value', 'N/A')
+                            logger.info(f"Read register {command_data['register']}: {value}")
+                            return True, f"Register {command_data['register']} = {value}", attempt
+                        except:
+                            return True, response.text, attempt
+                    else:
+                        logger.warning(f"Attempt {attempt}/{max_retries} failed: {response.status_code} - {response.text}")
+                        if attempt < max_retries:
+                            time.sleep(retry_delay)
+                    
+                elif command_data['type'] == 'register':
                     # Single register write
                     url = f"{base_url}?command=register&inverter={serial}&register={command_data['register']}&value={command_data['value']}"
                     response = requests.put(url, timeout=10)
@@ -293,7 +311,13 @@ class ScheduleExecutor:
     def build_command(schedule: sqlite3.Row) -> Optional[Dict]:
         """Build command data from schedule"""
         try:
-            if schedule['command_type'] == 'register':
+            if schedule['command_type'] == 'read':
+                return {
+                    'type': 'read',
+                    'register': schedule['register_number']
+                }
+            
+            elif schedule['command_type'] == 'register':
                 return {
                     'type': 'register',
                     'register': schedule['register_number'],
