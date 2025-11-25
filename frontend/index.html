@@ -93,16 +93,22 @@
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav ms-auto">
                     <li class="nav-item">
-                        <a class="nav-link" href="#" onclick="showTab('dashboard')">Dashboard</a>
+                        <a class="nav-link" href="#" onclick="showTab('dashboard', event)">Dashboard</a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="#" onclick="showTab('schedules')">Schedules</a>
+                        <a class="nav-link" href="#" onclick="showTab('schedules', event)">Schedules</a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="#" onclick="showTab('logs')">Execution Logs</a>
+                        <a class="nav-link" href="#" onclick="showTab('logs', event)">Execution Logs</a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="#" onclick="showTab('config')">Configuration</a>
+                        <a class="nav-link" href="#" onclick="showTab('registers', event)">Read Registers</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" onclick="showTab('register-management', event)">Register Management</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" onclick="showTab('config', event)">Configuration</a>
                     </li>
                 </ul>
             </div>
@@ -216,6 +222,120 @@
                 <div class="card-body">
                     <div id="logs-container"></div>
                 </div>
+            </div>
+        </div>
+
+        <!-- Read Registers Tab -->
+        <div id="registers-tab" class="tab-content" style="display:none;">
+            <h2 class="mb-4">Read Registers</h2>
+            
+            <div class="row">
+                <!-- Quick Read Section -->
+                <div class="col-md-6">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5><i class="bi bi-lightning-charge"></i> Quick Read</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="mb-3">
+                                <label for="quick-register" class="form-label">Register Number</label>
+                                <input type="number" class="form-control" id="quick-register" placeholder="e.g., 1070">
+                            </div>
+                            <button onclick="readSingleRegister()" class="btn btn-primary">
+                                <i class="bi bi-download"></i> Read Register
+                            </button>
+                            <div id="quick-read-result" class="mt-3"></div>
+                        </div>
+                    </div>
+
+                    <div class="card mt-3">
+                        <div class="card-header">
+                            <h5><i class="bi bi-layers"></i> Bulk Read</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="mb-3">
+                                <label for="bulk-start-register" class="form-label">Start Register</label>
+                                <input type="number" class="form-control" id="bulk-start-register" placeholder="e.g., 1070">
+                            </div>
+                            <div class="mb-3">
+                                <label for="bulk-end-register" class="form-label">End Register</label>
+                                <input type="number" class="form-control" id="bulk-end-register" placeholder="e.g., 1088">
+                            </div>
+                            <button onclick="readBulkRegisters()" class="btn btn-primary">
+                                <i class="bi bi-download"></i> Read Range
+                            </button>
+                            <div id="bulk-read-status" class="mt-3"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Results Section -->
+                <div class="col-md-6">
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <h5><i class="bi bi-table"></i> Read Results</h5>
+                            <button onclick="clearReadResults()" class="btn btn-sm btn-outline-secondary">
+                                <i class="bi bi-trash"></i> Clear
+                            </button>
+                        </div>
+                        <div class="card-body">
+                            <div id="register-results" class="table-responsive">
+                                <p class="text-muted">No registers read yet. Use Quick Read or Bulk Read to get started.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Common Registers -->
+                    <div class="card mt-3">
+                        <div class="card-header">
+                            <h5><i class="bi bi-bookmark-star"></i> Common Registers</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="list-group">
+                                <button class="list-group-item list-group-item-action d-flex justify-content-between align-items-center" onclick="readRegisterByNumber(1044)">
+                                    <span>Priority Mode (1044)</span>
+                                    <i class="bi bi-download"></i>
+                                </button>
+                                <button class="list-group-item list-group-item-action d-flex justify-content-between align-items-center" onclick="readRegisterRange(1070, 1088)">
+                                    <span>Grid First Settings (1070-1088)</span>
+                                    <i class="bi bi-download"></i>
+                                </button>
+                                <button class="list-group-item list-group-item-action d-flex justify-content-between align-items-center" onclick="readRegisterRange(1090, 1092)">
+                                    <span>Battery First Settings (1090-1092)</span>
+                                    <i class="bi bi-download"></i>
+                                </button>
+                                <button class="list-group-item list-group-item-action d-flex justify-content-between align-items-center" onclick="readRegisterRange(1100, 1108)">
+                                    <span>Battery First Schedule (1100-1108)</span>
+                                    <i class="bi bi-download"></i>
+                                </button>
+                                <button class="list-group-item list-group-item-action d-flex justify-content-between align-items-center" onclick="readRegisterRange(1110, 1118)">
+                                    <span>Load First Schedule (1110-1118)</span>
+                                    <i class="bi bi-download"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Register Management Tab -->
+        <div id="register-management-tab" class="tab-content" style="display:none;">
+            <h2 class="mb-4">Register Management</h2>
+            
+            <div class="row mb-3">
+                <div class="col">
+                    <button class="btn btn-primary" onclick="showRegisterModal()">
+                        <i class="bi bi-plus-circle"></i> Add Register
+                    </button>
+                    <button class="btn btn-secondary" onclick="loadRegisters()">
+                        <i class="bi bi-arrow-clockwise"></i> Refresh
+                    </button>
+                </div>
+            </div>
+
+            <div id="register-groups-container">
+                <!-- Register groups will be loaded here -->
             </div>
         </div>
 
@@ -353,10 +473,11 @@
                                 <strong><i class="bi bi-exclamation-triangle"></i> Important:</strong> Values must be in the format Grott expects. 
                                 <strong>YOU are responsible for hex conversion</strong> for time schedules.
                                 <br><small>
-                                    <strong>Example:</strong> For 9:00-17:00 enabled → Convert to hex: <code>0384-06a4-1</code><br>
-                                    • 9:00 (900 decimal) = 0x0384<br>
-                                    • 17:00 (1700 decimal) = 0x06a4<br>
-                                    • Enable flag = 1 (stays as 1)
+                                    <strong>Example:</strong> For 09:00-17:00 enabled → Convert to hex: <code>038406a40001</code><br>
+                                    • 9:00 (hour * 256 + minutes) 2304 = 0x0384<br>
+                                    • 17:00 (hour * 256 + minutes) 4516 = 0x06a4<br>
+                                    • Enable flag = 1 (as hex) 0001
+                                    • send: 038406a40001
                                 </small>
                             </div>
                             <div class="mb-3">
@@ -372,15 +493,16 @@
                             <div class="mb-3">
                                 <label for="multiregister-value" class="form-label">Value * 
                                     <i class="bi bi-info-circle" style="cursor: help;" 
-                                       title="For time schedules: Use hex format (e.g., 0384-06a4-1). For decimal values: Enter as decimal (e.g., 100). YOU must do conversions!"></i>
+                                       title="For time schedules: Use hex format (e.g., 038406a40001). For decimal values: Enter as decimal (e.g., 100). YOU must do conversions!"></i>
                                 </label>
                                 <input type="text" class="form-control" id="multiregister-value" 
-                                       placeholder="0384-06a4-1 (hex for times) or 100 (decimal)"
+                                       placeholder="038406a40001 (hex for times) or 100 (decimal)"
                                        title="Time schedules need hex format! Example: 900 decimal = 0384 hex, 1700 decimal = 06a4 hex">
                                 <div class="form-text">
-                                    <strong>Time schedules:</strong> Use hex (e.g., <code>0384-06a4-1</code> for 9:00-17:00-enabled)<br>
+                                    <strong>Time schedules:</strong> Use hex (e.g., <code>038406a40001</code> for 9:00-17:00-enabled)<br>
+                                    <small class="text-muted">Use: <code>HOUR * 256 + MINUTES</code> to get decimal value then convert to hex) 9:00 = 2304, 17:00 = 4516</small><br>
+                                    <small class="text-muted">Use online hex converter: 2304 → 0x0384, 4516 → 0x06a4, 1 → 0001</small><br>
                                     <strong>Decimal values:</strong> Enter as-is (e.g., <code>100</code>)<br>
-                                    <small class="text-muted">Use online hex converter: 900 → 0x0384, 1700 → 0x06a4</small>
                                 </div>
                             </div>
                         </div>
@@ -512,6 +634,115 @@
         </div>
     </div>
 
+    <!-- Register Modal -->
+    <div class="modal fade" id="registerModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="registerModalLabel">Add Register</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="register-form">
+                        <input type="hidden" id="edit-register-number">
+                        
+                        <div class="mb-3">
+                            <label for="new-register-number" class="form-label">Register Number *</label>
+                            <input type="number" class="form-control" id="new-register-number" required>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="register-name" class="form-label">Name *</label>
+                            <input type="text" class="form-control" id="register-name" required>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="register-description" class="form-label">Description</label>
+                            <textarea class="form-control" id="register-description" rows="2"></textarea>
+                        </div>
+                        
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label for="register-group" class="form-label">Group</label>
+                                <select class="form-select" id="register-group">
+                                    <!-- Populated from register_groups -->
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label for="register-type" class="form-label">Type</label>
+                                <select class="form-select" id="register-type">
+                                    <option value="0">Hex</option>
+                                    <option value="1" selected>Decimal</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label for="register-value-type" class="form-label">Value Type</label>
+                                <select class="form-select" id="register-value-type">
+                                    <option value="decimal">Decimal</option>
+                                    <option value="hex">Hex</option>
+                                    <option value="time">Time</option>
+                                    <option value="boolean">Boolean</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label for="register-category" class="form-label">Category</label>
+                                <select class="form-select" id="register-category">
+                                    <option value="priority">Priority</option>
+                                    <option value="schedule">Schedule</option>
+                                    <option value="battery">Battery</option>
+                                    <option value="grid">Grid</option>
+                                    <option value="other">Other</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label for="register-min" class="form-label">Min Value</label>
+                                <input type="number" class="form-control" id="register-min">
+                            </div>
+                            <div class="col-md-6">
+                                <label for="register-max" class="form-label">Max Value</label>
+                                <input type="number" class="form-control" id="register-max">
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="register-current-value" class="form-label">Current Value</label>
+                            <div class="input-group">
+                                <input type="number" class="form-control" id="register-current-value" value="0">
+                                <button class="btn btn-outline-secondary" type="button" id="read-register-btn" onclick="readRegisterValue()">
+                                    <span id="read-register-spinner" class="spinner-border spinner-border-sm d-none" role="status" aria-hidden="true"></span>
+                                    <span id="read-register-text">Read</span>
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div class="form-check mb-3">
+                            <input class="form-check-input" type="checkbox" id="register-write-only">
+                            <label class="form-check-label" for="register-write-only">
+                                Write Only
+                            </label>
+                        </div>
+                        
+                        <div class="mb-3" id="read-register-field" style="display:none;">
+                            <label for="register-read-from" class="form-label">Read Register Number</label>
+                            <input type="number" class="form-control" id="register-read-from">
+                            <div class="form-text">Register to read value from (for write-only registers)</div>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" onclick="saveRegister()">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Bootstrap 5 JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     
@@ -551,7 +782,7 @@
         }
         
         // Tab navigation
-        function showTab(tabName) {
+        function showTab(tabName, event) {
             // Hide all tabs
             document.querySelectorAll('.tab-content').forEach(tab => {
                 tab.style.display = 'none';
@@ -564,7 +795,9 @@
             document.querySelectorAll('.navbar-nav .nav-link').forEach(link => {
                 link.classList.remove('active');
             });
-            event.target.classList.add('active');
+            if (event && event.target) {
+                event.target.classList.add('active');
+            }
             
             // Reload data for specific tabs
             if (tabName === 'schedules') {
@@ -573,6 +806,8 @@
                 loadLogs();
             } else if (tabName === 'dashboard') {
                 loadStats();
+            } else if (tabName === 'register-management') {
+                loadRegisterManagement();
             }
         }
         
@@ -1111,7 +1346,478 @@
                 childFields.style.display = 'none';
             }
         }
+
+        // ========== Register Reading Functions ==========
+        
+        // Read a single register
+        async function readSingleRegister() {
+            const registerNum = parseInt(document.getElementById('quick-register').value);
+            if (!registerNum) {
+                alert('Please enter a register number');
+                return;
+            }
+            
+            const resultDiv = document.getElementById('quick-read-result');
+            resultDiv.innerHTML = '<div class="spinner-border spinner-border-sm"></div> Reading...';
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}/read-register/${registerNum}`);
+                const data = await response.json();
+                
+                if (!data.success) {
+                    throw new Error(data.error || 'Failed to read register');
+                }
+                
+                const value = data.value;
+                
+                // Find register info
+                const regInfo = registers.find(r => r.register_number === registerNum);
+                const name = regInfo ? regInfo.name : 'Unknown';
+                const description = regInfo ? regInfo.description : '';
+                
+                resultDiv.innerHTML = `
+                    <div class="alert alert-success">
+                        <strong>Register ${registerNum}:</strong> ${name}<br>
+                        <strong>Value:</strong> ${value} (0x${parseInt(value).toString(16).toUpperCase().padStart(4, '0')})<br>
+                        ${description ? `<small class="text-muted">${description}</small>` : ''}
+                    </div>
+                `;
+                
+                // Add to results table
+                addToResultsTable([{register: registerNum, value: value, name: name, description: description}]);
+                
+            } catch (error) {
+                resultDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+            }
+        }
+        
+        // Read by register number (for common registers buttons)
+        async function readRegisterByNumber(registerNum) {
+            document.getElementById('quick-register').value = registerNum;
+            await readSingleRegister();
+        }
+        
+        // Read bulk registers
+        async function readBulkRegisters() {
+            const startReg = parseInt(document.getElementById('bulk-start-register').value);
+            const endReg = parseInt(document.getElementById('bulk-end-register').value);
+            
+            if (!startReg || !endReg) {
+                alert('Please enter start and end register numbers');
+                return;
+            }
+            
+            if (startReg > endReg) {
+                alert('Start register must be less than or equal to end register');
+                return;
+            }
+            
+            await readRegisterRange(startReg, endReg);
+        }
+        
+        // Read a range of registers
+        async function readRegisterRange(startReg, endReg) {
+            const statusDiv = document.getElementById('bulk-read-status');
+            statusDiv.innerHTML = `<div class="spinner-border spinner-border-sm"></div> Reading ${endReg - startReg + 1} registers...`;
+            
+            try {
+                // Build array of register numbers
+                const registerList = [];
+                for (let reg = startReg; reg <= endReg; reg++) {
+                    registerList.push(reg);
+                }
+                
+                // Call API to read registers
+                const response = await fetch(`${API_BASE_URL}/read-registers`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        registers: registerList
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.results && data.results.length > 0) {
+                    statusDiv.innerHTML = `<div class="alert alert-success">Successfully read ${data.successful} of ${data.total} registers</div>`;
+                    
+                    // Convert to format for results table
+                    const results = data.results.map(r => {
+                        const regInfo = registers.find(reg => reg.register_number === r.register);
+                        return {
+                            register: r.register,
+                            value: r.value,
+                            name: regInfo ? regInfo.name : 'Unknown',
+                            description: regInfo ? regInfo.description : ''
+                        };
+                    });
+                    
+                    addToResultsTable(results);
+                } else {
+                    statusDiv.innerHTML = `<div class="alert alert-warning">No registers could be read</div>`;
+                }
+                
+                if (data.failed && data.failed.length > 0) {
+                    console.error('Failed registers:', data.failed);
+                }
+                
+            } catch (error) {
+                statusDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+            }
+        }
+        
+        // Add results to the results table
+        function addToResultsTable(results) {
+            const container = document.getElementById('register-results');
+            
+            // Create or get existing table
+            let table = container.querySelector('table');
+            if (!table) {
+                container.innerHTML = `
+                    <table class="table table-striped table-sm">
+                        <thead>
+                            <tr>
+                                <th>Register</th>
+                                <th>Name</th>
+                                <th>Value</th>
+                                <th>Hex</th>
+                            </tr>
+                        </thead>
+                        <tbody id="results-tbody"></tbody>
+                    </table>
+                `;
+                table = container.querySelector('table');
+            }
+            
+            const tbody = document.getElementById('results-tbody');
+            
+            results.forEach(result => {
+                const hexValue = parseInt(result.value).toString(16).toUpperCase().padStart(4, '0');
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td><strong>${result.register}</strong></td>
+                    <td>
+                        ${result.name}
+                        ${result.description ? `<br><small class="text-muted">${result.description}</small>` : ''}
+                    </td>
+                    <td>${result.value}</td>
+                    <td><code>0x${hexValue}</code></td>
+                `;
+                tbody.insertBefore(row, tbody.firstChild);
+            });
+            
+            // Limit to 50 rows
+            while (tbody.children.length > 50) {
+                tbody.removeChild(tbody.lastChild);
+            }
+        }
+        
+        // Clear results
+        function clearReadResults() {
+            document.getElementById('register-results').innerHTML = '<p class="text-muted">No registers read yet. Use Quick Read or Bulk Read to get started.</p>';
+            document.getElementById('quick-read-result').innerHTML = '';
+            document.getElementById('bulk-read-status').innerHTML = '';
+        }
+        
+        // Get config helper
+        async function getConfig() {
+            if (config.length === 0) {
+                await loadConfig();
+            }
+            return config.reduce((acc, item) => {
+                acc[item.key] = item.value;
+                return acc;
+            }, {});
+        }
+
+        // ========== Register Management Functions ==========
+        
+        let registerGroups = [];
+        let allRegisters = [];
+        
+        async function loadRegisterManagement() {
+            await Promise.all([loadRegisterGroups(), loadAllRegisters()]);
+            displayRegistersByGroup();
+        }
+        
+        async function loadRegisterGroups() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/register-groups`);
+                registerGroups = await response.json();
+                
+                // Populate group dropdown in modal
+                const groupSelect = document.getElementById('register-group');
+                groupSelect.innerHTML = registerGroups.map(g => 
+                    `<option value="${g.id}">${g.name}</option>`
+                ).join('');
+            } catch (error) {
+                console.error('Error loading register groups:', error);
+            }
+        }
+        
+        async function loadAllRegisters() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/registers-full`);
+                allRegisters = await response.json();
+            } catch (error) {
+                console.error('Error loading registers:', error);
+            }
+        }
+        
+        function displayRegistersByGroup() {
+            const container = document.getElementById('register-groups-container');
+            container.innerHTML = '';
+            
+            registerGroups.forEach(group => {
+                const groupRegisters = allRegisters.filter(r => r.group_id === group.id);
+                
+                if (groupRegisters.length === 0) return; // Skip empty groups
+                
+                const groupCard = document.createElement('div');
+                groupCard.className = 'card mb-3';
+                groupCard.innerHTML = `
+                    <div class="card-header">
+                        <h5>${group.name} <span class="badge bg-secondary">${groupRegisters.length}</span></h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-sm">
+                                <thead>
+                                    <tr>
+                                        <th>Register</th>
+                                        <th>Name</th>
+                                        <th>Description</th>
+                                        <th>Type</th>
+                                        <th>Current Value</th>
+                                        <th>Last Updated</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${groupRegisters.map(reg => `
+                                        <tr>
+                                            <td><code>${reg.register_number}</code></td>
+                                            <td>${reg.name}</td>
+                                            <td>${reg.description || '-'}</td>
+                                            <td><span class="badge bg-${reg.type === 0 ? 'info' : 'success'}">${reg.type === 0 ? 'Hex' : 'Dec'}</span></td>
+                                            <td>${reg.current_value !== null ? reg.current_value : '-'}</td>
+                                            <td>${reg.last_updated ? new Date(reg.last_updated).toLocaleString() : '-'}</td>
+                                            <td>
+                                                <button class="btn btn-sm btn-primary" onclick="editRegister(${reg.register_number})">
+                                                    <i class="bi bi-pencil"></i>
+                                                </button>
+                                                <button class="btn btn-sm btn-danger" onclick="deleteRegister(${reg.register_number})">
+                                                    <i class="bi bi-trash"></i>
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                `;
+                container.appendChild(groupCard);
+            });
+        }
+        
+        function showRegisterModal(registerNumber = null) {
+            const modal = new bootstrap.Modal(document.getElementById('registerModal'));
+            const form = document.getElementById('register-form');
+            form.reset();
+            
+            document.getElementById('edit-register-number').value = '';
+            document.getElementById('new-register-number').disabled = false;
+            document.getElementById('registerModalLabel').textContent = 'Add Register';
+            
+            if (registerNumber) {
+                editRegister(registerNumber);
+            }
+            
+            modal.show();
+        }
+        
+        async function editRegister(registerNumber) {
+            try {
+                const response = await fetch(`${API_BASE_URL}/registers/${registerNumber}`);
+                const reg = await response.json();
+                
+                document.getElementById('edit-register-number').value = reg.register_number;
+                document.getElementById('new-register-number').value = reg.register_number;
+                document.getElementById('new-register-number').disabled = true;
+                document.getElementById('register-name').value = reg.name;
+                document.getElementById('register-description').value = reg.description || '';
+                document.getElementById('register-group').value = reg.group_id;
+                document.getElementById('register-type').value = reg.type || 0;
+                document.getElementById('register-value-type').value = reg.value_type || 'decimal';
+                document.getElementById('register-category').value = reg.category || 'other';
+                document.getElementById('register-min').value = reg.min_value || '';
+                document.getElementById('register-max').value = reg.max_value || '';
+                document.getElementById('register-current-value').value = reg.current_value || 0;
+                document.getElementById('register-write-only').checked = reg.write_only === 1;
+                document.getElementById('register-read-from').value = reg.read_register || '';
+                
+                document.getElementById('registerModalLabel').textContent = 'Edit Register';
+                
+                const modal = new bootstrap.Modal(document.getElementById('registerModal'));
+                modal.show();
+            } catch (error) {
+                alert('Error loading register: ' + error);
+            }
+        }
+        
+        async function saveRegister() {
+            const editingRegNum = document.getElementById('edit-register-number').value;
+            const registerNumber = document.getElementById('new-register-number').value;
+            
+            if (!registerNumber) {
+                alert('Register number is required');
+                return;
+            }
+            
+            const data = {
+                register_number: parseInt(registerNumber),
+                name: document.getElementById('register-name').value,
+                description: document.getElementById('register-description').value,
+                group_id: parseInt(document.getElementById('register-group').value),
+                type: parseInt(document.getElementById('register-type').value),
+                value_type: document.getElementById('register-value-type').value,
+                category: document.getElementById('register-category').value,
+                min_value: document.getElementById('register-min').value ? parseInt(document.getElementById('register-min').value) : null,
+                max_value: document.getElementById('register-max').value ? parseInt(document.getElementById('register-max').value) : null,
+                current_value: parseInt(document.getElementById('register-current-value').value || 0),
+                write_only: document.getElementById('register-write-only').checked ? 1 : 0,
+                read_register: document.getElementById('register-read-from').value ? parseInt(document.getElementById('register-read-from').value) : null
+            };
+            
+            try {
+                let response;
+                if (editingRegNum) {
+                    // Update existing register
+                    response = await fetch(`${API_BASE_URL}/registers/${editingRegNum}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(data)
+                    });
+                } else {
+                    // Create new register
+                    response = await fetch(`${API_BASE_URL}/registers`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(data)
+                    });
+                }
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    bootstrap.Modal.getInstance(document.getElementById('registerModal')).hide();
+                    await loadRegisterManagement();
+                } else {
+                    alert('Error: ' + (result.error || 'Unknown error'));
+                }
+            } catch (error) {
+                alert('Error saving register: ' + error);
+            }
+        }
+        
+        async function deleteRegister(registerNumber) {
+            if (!confirm(`Are you sure you want to delete register ${registerNumber}?`)) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}/registers/${registerNumber}`, {
+                    method: 'DELETE'
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    await loadRegisterManagement();
+                    alert('Register deleted successfully');
+                } else {
+                    alert('Error: ' + (result.error || 'Unknown error'));
+                }
+            } catch (error) {
+                alert('Error deleting register: ' + error);
+            }
+        }
+        
+        // Read register value from inverter
+        async function readRegisterValue() {
+            const registerNumber = document.getElementById('new-register-number').value;
+            const editingRegNum = document.getElementById('edit-register-number').value;
+            const regNum = editingRegNum || registerNumber;
+            
+            if (!regNum) {
+                alert('Please enter a register number first');
+                return;
+            }
+            
+            const btn = document.getElementById('read-register-btn');
+            const spinner = document.getElementById('read-register-spinner');
+            const text = document.getElementById('read-register-text');
+            
+            // Show spinner and disable button
+            spinner.classList.remove('d-none');
+            text.textContent = ' Reading...';
+            btn.disabled = true;
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}/read-register/${regNum}`);
+                const result = await response.json();
+                
+                if (result.success) {
+                    let value = result.value;
+                    const valueType = document.getElementById('register-value-type').value;
+                    
+                    // Convert time format if needed
+                    if (valueType === 'time') {
+                        // Convert from (HH*256 + mm) to HHmm format
+                        const hours = Math.floor(value / 256);
+                        const minutes = value % 256;
+                        value = hours * 100 + minutes;
+                    }
+                    
+                    // Update current value field
+                    const currentValueInput = document.getElementById('register-current-value');
+                    const oldValue = currentValueInput.value;
+                    currentValueInput.value = value;
+                    
+                    // Highlight if value changed
+                    if (oldValue != value) {
+                        currentValueInput.classList.add('border-success');
+                        setTimeout(() => {
+                            currentValueInput.classList.remove('border-success');
+                        }, 2000);
+                    }
+                } else {
+                    alert('Failed to read register: ' + (result.error || 'Unknown error'));
+                }
+            } catch (error) {
+                alert('Error reading register: ' + error);
+            } finally {
+                // Hide spinner and enable button
+                spinner.classList.add('d-none');
+                text.textContent = 'Read';
+                btn.disabled = false;
+            }
+        }
+        
+        // Toggle read register field visibility
+        document.addEventListener('DOMContentLoaded', function() {
+            const writeOnlyCheckbox = document.getElementById('register-write-only');
+            if (writeOnlyCheckbox) {
+                writeOnlyCheckbox.addEventListener('change', function() {
+                    document.getElementById('read-register-field').style.display = this.checked ? 'block' : 'none';
+                });
+            }
+        });
     </script>
 </body>
 </html>
+
 

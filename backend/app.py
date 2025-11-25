@@ -58,8 +58,6 @@ class Database:
         """Get database connection"""
         conn = sqlite3.connect(DATABASE_PATH)
         conn.row_factory = sqlite3.Row
-        # Enable foreign key constraints for CASCADE DELETE
-        conn.execute("PRAGMA foreign_keys = ON")
         return conn
     
     @staticmethod
@@ -135,7 +133,7 @@ class InverterCommand:
                 if command_data['type'] == 'read':
                     # Read register value
                     url = f"{base_url}?command=register&inverter={serial}&register={command_data['register']}"
-                    response = requests.get(url, timeout=30)
+                    response = requests.get(url, timeout=10)
                     
                     if response.status_code == 200:
                         try:
@@ -152,13 +150,77 @@ class InverterCommand:
                     
                 elif command_data['type'] == 'register':
                     # Single register write
-                    url = f"{base_url}?command=register&inverter={serial}&register={command_data['register']}&value={command_data['value']}"
-                    response = requests.put(url, timeout=30)
+                    register_num = command_data['register']
+                    
+                    # Special handling: registers 1070-1088 must be written together
+                    if 1070 <= register_num <= 1088:
+                        logger.info(f"Register {register_num} is in range 1070-1088, using database values for multiregister write")
+                        try:
+                            # Get all register values and metadata from database
+                            register_values = {}
+                            register_metadata = {}
+                            for reg in range(1070, 1089):
+                                row = Database.fetch_one(
+                                    """SELECT rv.current_value, r.type, r.value_type 
+                                       FROM register_values rv
+                                       LEFT JOIN registers r ON rv.register_number = r.register_number
+                                       WHERE rv.register_number = ?""",
+                                    (reg,)
+                                )
+                                if row:
+                                    register_values[reg] = row['current_value'] if row['current_value'] is not None else 0
+                                    register_metadata[reg] = {'type': row['type'], 'value_type': row['value_type']}
+                                else:
+                                    register_values[reg] = 0
+                                    register_metadata[reg] = {'type': 0, 'value_type': 'decimal'}
+                            
+                            # Update the target register with new value
+                            register_values[register_num] = command_data['value']
+                            
+                            # Update database with new value
+                            Database.execute(
+                                """INSERT OR REPLACE INTO register_values 
+                                   (register_number, current_value, last_updated) 
+                                   VALUES (?, ?, CURRENT_TIMESTAMP)""",
+                                (register_num, command_data['value'])
+                            )
+                            
+                            # Build hex value string for multiregister write
+                            # Handle time conversion: if type=hex (0) and value_type=time, convert HHmm to (HH*256+mm)
+                            hex_parts = []
+                            for reg in range(1070, 1089):
+                                value = int(register_values[reg])
+                                metadata = register_metadata[reg]
+                                
+                                # Convert time format if needed
+                                if metadata['type'] == 0 and metadata['value_type'] == 'time':
+                                    # Value is stored as HHmm (e.g., 1915), convert to (HH*256 + mm)
+                                    hours = value // 100
+                                    minutes = value % 100
+                                    value = (hours * 256) + minutes
+                                
+                                hex_parts.append(f"{value:04x}")
+                            
+                            hex_values = ''.join(hex_parts)
+                            
+                            logger.info(f"Writing all registers 1070-1088 with {register_num}={command_data['value']} (hex: {hex_values})")
+                            url = f"{base_url}?command=multiregister&inverter={serial}&startregister=1070&endregister=1088&value={hex_values}"
+                            response = requests.put(url, timeout=30)
+                            
+                        except Exception as e:
+                            logger.error(f"Error handling registers 1070-1088: {str(e)}")
+                            # Fall back to simple single register write
+                            url = f"{base_url}?command=register&inverter={serial}&register={register_num}&value={command_data['value']}"
+                            response = requests.put(url, timeout=30)
+                    else:
+                        # Normal single register write
+                        url = f"{base_url}?command=register&inverter={serial}&register={register_num}&value={command_data['value']}"
+                        response = requests.put(url, timeout=30)
                     
                 elif command_data['type'] == 'multiregister':
                     # Multi-register write
                     url = f"{base_url}?command=multiregister&inverter={serial}&startregister={command_data['start_register']}&endregister={command_data['end_register']}&value={command_data['value']}"
-                    response = requests.put(url, timeout=30)
+                    response = requests.put(url, timeout=10)
                     
                 elif command_data['type'] == 'custom':
                     # Custom curl command - parse and execute
@@ -204,7 +266,7 @@ class InverterCommand:
             serial = config.get('inverter_serial', 'NTCRBLR00Y')
             
             url = f"http://{host}:{port}/inverter?command=register&inverter={serial}&register={condition_register}"
-            response = requests.get(url, timeout=30)
+            response = requests.get(url, timeout=10)
             
             if response.status_code != 200:
                 return False, f"Failed to read register {condition_register}"
@@ -238,9 +300,9 @@ class ScheduleExecutor:
     """Execute scheduled tasks"""
     
     @staticmethod
-    def execute_schedule(schedule_id: int, parent_execution_id: Optional[int] = None, execution_order: int = 0):
-        """Execute a schedule and its children in order"""
-        logger.info(f"Executing schedule ID: {schedule_id} (order: {execution_order})")
+    def execute_schedule(schedule_id: int):
+        """Execute a schedule"""
+        logger.info(f"Executing schedule ID: {schedule_id}")
         
         # Get schedule details
         schedule = Database.fetch_one(
@@ -250,7 +312,7 @@ class ScheduleExecutor:
         
         if not schedule:
             logger.warning(f"Schedule {schedule_id} not found or disabled")
-            return None, False
+            return
         
         # Check condition if applicable
         condition_met = True
@@ -267,21 +329,19 @@ class ScheduleExecutor:
             if not condition_met:
                 logger.info(f"Condition not met for schedule {schedule_id}: {condition_details}")
                 # Log skipped execution
-                cursor = Database.execute(
+                Database.execute(
                     """INSERT INTO execution_logs 
-                       (schedule_id, schedule_name, command, success, attempts, condition_met, condition_details, 
-                        parent_execution_id, execution_order)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (schedule_id, schedule['name'], "Skipped - condition not met", True, 0, False, condition_details,
-                     parent_execution_id, execution_order)
+                       (schedule_id, schedule_name, command, success, attempts, condition_met, condition_details)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (schedule_id, schedule['name'], "Skipped - condition not met", True, 0, False, condition_details)
                 )
-                return cursor.lastrowid, True
+                return
         
         # Build command
         command_data = ScheduleExecutor.build_command(schedule)
         if not command_data:
             logger.error(f"Failed to build command for schedule {schedule_id}")
-            return None, False
+            return
         
         # Execute command
         success, response, attempts = InverterCommand.execute_command(
@@ -290,17 +350,14 @@ class ScheduleExecutor:
         )
         
         # Log execution
-        cursor = Database.execute(
+        Database.execute(
             """INSERT INTO execution_logs 
-               (schedule_id, schedule_name, command, success, attempts, response, error_message, 
-                condition_met, condition_details, parent_execution_id, execution_order)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (schedule_id, schedule_name, command, success, attempts, response, error_message, condition_met, condition_details)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (schedule_id, schedule['name'], json.dumps(command_data), success, attempts,
              response if success else None, response if not success else None,
-             condition_met, condition_details, parent_execution_id, execution_order)
+             condition_met, condition_details)
         )
-        
-        execution_log_id = cursor.lastrowid
         
         # Update last executed
         Database.execute(
@@ -313,43 +370,6 @@ class ScheduleExecutor:
             ScheduleExecutor.send_pushover_notification(schedule, response, attempts)
         
         logger.info(f"Schedule {schedule_id} execution completed: {'SUCCESS' if success else 'FAILED'}")
-        
-        # Execute child schedules if parent succeeded (or if children are set to run anyway)
-        children = Database.fetch_all(
-            """SELECT * FROM schedules 
-               WHERE parent_schedule_id = ? AND enabled = 1 
-               ORDER BY execution_order ASC""",
-            (schedule_id,)
-        )
-        
-        if children:
-            logger.info(f"Found {len(children)} child schedule(s) for schedule {schedule_id}")
-            
-            for child in children:
-                # Check if we should execute this child
-                should_execute = success or child['continue_on_parent_failure']
-                
-                if should_execute:
-                    logger.info(f"Executing child schedule {child['id']} (continue_on_failure: {child['continue_on_parent_failure']})")
-                    ScheduleExecutor.execute_schedule(
-                        child['id'], 
-                        parent_execution_id=execution_log_id,
-                        execution_order=child['execution_order']
-                    )
-                else:
-                    logger.info(f"Skipping child schedule {child['id']} - parent failed and continue_on_parent_failure is disabled")
-                    # Log the skip
-                    Database.execute(
-                        """INSERT INTO execution_logs 
-                           (schedule_id, schedule_name, command, success, attempts, error_message, 
-                            parent_execution_id, execution_order)
-                           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                        (child['id'], child['name'], "Skipped - parent failed", False, 0,
-                         "Parent schedule failed and continue_on_parent_failure is disabled",
-                         execution_log_id, child['execution_order'])
-                    )
-        
-        return execution_log_id, success
     
     @staticmethod
     def build_command(schedule: sqlite3.Row) -> Optional[Dict]:
@@ -456,12 +476,376 @@ def get_registers():
     return jsonify(registers)
 
 
+@app.route('/api/register-values', methods=['GET', 'PUT'])
+def manage_register_values():
+    """Get or update register values (source of truth)"""
+    if request.method == 'GET':
+        # Get specific register or all registers
+        register_num = request.args.get('register', type=int)
+        if register_num:
+            row = Database.fetch_one(
+                """SELECT rv.*, r.name, r.description 
+                   FROM register_values rv
+                   LEFT JOIN registers r ON rv.register_number = r.register_number
+                   WHERE rv.register_number = ?""",
+                (register_num,)
+            )
+            if not row:
+                return jsonify({'error': 'Register not found'}), 404
+            return jsonify(dict(row))
+        else:
+            # Get all register values
+            rows = Database.fetch_all("""
+                SELECT rv.*, r.name, r.description 
+                FROM register_values rv
+                LEFT JOIN registers r ON rv.register_number = r.register_number
+                ORDER BY rv.register_number
+            """)
+            values = [dict(row) for row in rows]
+            return jsonify(values)
+    
+    elif request.method == 'PUT':
+        # Update register value(s)
+        data = request.json
+        if isinstance(data, list):
+            # Bulk update
+            for item in data:
+                Database.execute(
+                    """INSERT OR REPLACE INTO register_values 
+                       (register_number, current_value, last_updated) 
+                       VALUES (?, ?, CURRENT_TIMESTAMP)""",
+                    (item['register_number'], item['current_value'])
+                )
+            return jsonify({'success': True, 'message': f'Updated {len(data)} register values'})
+        else:
+            # Single update
+            Database.execute(
+                """INSERT OR REPLACE INTO register_values 
+                   (register_number, current_value, last_updated) 
+                   VALUES (?, ?, CURRENT_TIMESTAMP)""",
+                (data['register_number'], data['current_value'])
+            )
+            return jsonify({'success': True, 'message': 'Register value updated'})
+
+
+@app.route('/api/register-values/sync', methods=['POST'])
+def sync_register_values():
+    """Read register values from inverter and update database"""
+    try:
+        config = InverterCommand.get_config()
+        host = config.get('grott_host', '<grottserver>')
+        port = config.get('grott_port', '5782')
+        serial = config.get('inverter_serial', 'NTCRBLR00Y')
+        base_url = f"http://{host}:{port}/inverter"
+        
+        # Get list of registers to sync
+        data = request.json or {}
+        registers = data.get('registers', list(range(1070, 1089)))  # Default to 1070-1088
+        
+        synced = []
+        failed = []
+        
+        for reg in registers:
+            try:
+                url = f"{base_url}?command=register&inverter={serial}&register={reg}"
+                response = requests.get(url, timeout=30)
+                
+                if response.status_code == 200:
+                    reg_data = response.json()
+                    value = int(reg_data.get('value', 0))
+                    
+                    # Update database
+                    Database.execute(
+                        """INSERT OR REPLACE INTO register_values 
+                           (register_number, current_value, last_updated, last_read_from_inverter) 
+                           VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)""",
+                        (reg, value)
+                    )
+                    synced.append({'register': reg, 'value': value})
+                    logger.info(f"Synced register {reg} = {value}")
+                else:
+                    failed.append({'register': reg, 'error': f"HTTP {response.status_code}"})
+                    logger.warning(f"Failed to sync register {reg}: {response.status_code}")
+            
+            except Exception as e:
+                failed.append({'register': reg, 'error': str(e)})
+                logger.error(f"Error syncing register {reg}: {e}")
+        
+        return jsonify({
+            'success': len(failed) == 0,
+            'synced': synced,
+            'failed': failed,
+            'message': f'Synced {len(synced)} registers, {len(failed)} failed'
+        })
+    
+    except Exception as e:
+        logger.error(f"Error syncing register values: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/read-register/<int:register_number>', methods=['GET'])
+def read_register(register_number):
+    """Read a single register from the inverter via Grott"""
+    try:
+        config = InverterCommand.get_config()
+        host = config.get('grott_host', '<grottserver>')
+        port = config.get('grott_port', '5782')
+        serial = request.args.get('inverter_serial') or config.get('inverter_serial', 'NTCRBLR00Y')
+        
+        url = f"http://{host}:{port}/inverter?command=register&inverter={serial}&register={register_number}"
+        response = requests.get(url, timeout=30)
+        
+        if response.status_code == 200:
+            try:
+                data = response.json()
+                return jsonify({
+                    'success': True,
+                    'register': register_number,
+                    'value': data.get('value'),
+                    'raw_response': data
+                })
+            except:
+                return jsonify({
+                    'success': True,
+                    'register': register_number,
+                    'value': response.text,
+                    'raw_response': response.text
+                })
+        else:
+            return jsonify({
+                'success': False,
+                'error': f"HTTP {response.status_code}: {response.text}"
+            }), response.status_code
+            
+    except Exception as e:
+        logger.error(f"Error reading register {register_number}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/read-registers', methods=['POST'])
+def read_registers():
+    """Read multiple registers from the inverter via Grott"""
+    try:
+        data = request.json or {}
+        registers = data.get('registers', [])
+        
+        if not registers:
+            return jsonify({'success': False, 'error': 'No registers specified'}), 400
+        
+        config = InverterCommand.get_config()
+        host = config.get('grott_host', '<grottserver>')
+        port = config.get('grott_port', '5782')
+        serial = data.get('inverter_serial') or config.get('inverter_serial', 'NTCRBLR00Y')
+        
+        results = []
+        failed = []
+        
+        for reg in registers:
+            try:
+                url = f"http://{host}:{port}/inverter?command=register&inverter={serial}&register={reg}"
+                response = requests.get(url, timeout=30)
+                
+                if response.status_code == 200:
+                    try:
+                        reg_data = response.json()
+                        value = reg_data.get('value')
+                    except:
+                        value = response.text
+                    
+                    results.append({
+                        'register': reg,
+                        'value': value,
+                        'success': True
+                    })
+                else:
+                    failed.append({
+                        'register': reg,
+                        'error': f"HTTP {response.status_code}",
+                        'success': False
+                    })
+            except Exception as e:
+                failed.append({
+                    'register': reg,
+                    'error': str(e),
+                    'success': False
+                })
+        
+        return jsonify({
+            'success': len(failed) == 0,
+            'results': results,
+            'failed': failed,
+            'total': len(registers),
+            'successful': len(results)
+        })
+        
+    except Exception as e:
+        logger.error(f"Error reading registers: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/templates', methods=['GET'])
 def get_templates():
     """Get all templates"""
     rows = Database.fetch_all("SELECT * FROM templates ORDER BY name")
     templates = [dict(row) for row in rows]
     return jsonify(templates)
+
+
+# Register Groups API
+@app.route('/api/register-groups', methods=['GET'])
+def get_register_groups():
+    """Get all register groups"""
+    try:
+        rows = Database.fetch_all("SELECT * FROM register_groups ORDER BY id")
+        groups = [dict(row) for row in rows]
+        return jsonify(groups)
+    except Exception as e:
+        logger.error(f"Error fetching register groups: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# Registers API
+@app.route('/api/registers-full', methods=['GET'])
+def get_registers_full():
+    """Get all registers with their groups and current values"""
+    try:
+        rows = Database.fetch_all("""
+            SELECT r.*, 
+                   rg.name as group_name,
+                   rv.current_value,
+                   rv.last_updated,
+                   rv.last_read_from_inverter
+            FROM registers r
+            LEFT JOIN register_groups rg ON r.group_id = rg.id
+            LEFT JOIN register_values rv ON r.register_number = rv.register_number
+            ORDER BY r.group_id, r.register_number
+        """)
+        registers = [dict(row) for row in rows]
+        return jsonify(registers)
+    except Exception as e:
+        logger.error(f"Error fetching registers: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/registers/<int:register_number>', methods=['GET', 'PUT', 'DELETE'])
+def manage_register(register_number):
+    """Get, update, or delete a specific register"""
+    try:
+        if request.method == 'GET':
+            row = Database.fetch_one("""
+                SELECT r.*, 
+                       rg.name as group_name,
+                       rv.current_value,
+                       rv.last_updated,
+                       rv.last_read_from_inverter
+                FROM registers r
+                LEFT JOIN register_groups rg ON r.group_id = rg.id
+                LEFT JOIN register_values rv ON r.register_number = rv.register_number
+                WHERE r.register_number = ?
+            """, (register_number,))
+            
+            if row:
+                return jsonify(dict(row))
+            return jsonify({'error': 'Register not found'}), 404
+        
+        elif request.method == 'PUT':
+            data = request.json
+            
+            # Update register metadata
+            Database.execute("""
+                UPDATE registers 
+                SET name = ?, 
+                    description = ?, 
+                    write_only = ?,
+                    read_register = ?,
+                    value_type = ?,
+                    type = ?,
+                    min_value = ?,
+                    max_value = ?,
+                    category = ?,
+                    group_id = ?
+                WHERE register_number = ?
+            """, (
+                data.get('name'),
+                data.get('description'),
+                data.get('write_only', 0),
+                data.get('read_register'),
+                data.get('value_type'),
+                data.get('type', 0),
+                data.get('min_value'),
+                data.get('max_value'),
+                data.get('category'),
+                data.get('group_id'),
+                register_number
+            ))
+            
+            # Update current value if provided
+            if 'current_value' in data:
+                Database.execute("""
+                    INSERT OR REPLACE INTO register_values 
+                    (register_number, current_value, last_updated)
+                    VALUES (?, ?, CURRENT_TIMESTAMP)
+                """, (register_number, data['current_value']))
+            
+            return jsonify({'success': True, 'message': 'Register updated'})
+        
+        elif request.method == 'DELETE':
+            # Delete register value first
+            Database.execute("DELETE FROM register_values WHERE register_number = ?", (register_number,))
+            # Delete register
+            Database.execute("DELETE FROM registers WHERE register_number = ?", (register_number,))
+            return jsonify({'success': True, 'message': 'Register deleted'})
+    
+    except Exception as e:
+        logger.error(f"Error managing register {register_number}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/registers', methods=['POST'])
+def create_register():
+    """Create a new register"""
+    try:
+        data = request.json
+        register_number = data.get('register_number')
+        
+        if not register_number:
+            return jsonify({'error': 'register_number is required'}), 400
+        
+        # Check if register already exists
+        existing = Database.fetch_one("SELECT register_number FROM registers WHERE register_number = ?", (register_number,))
+        if existing:
+            return jsonify({'error': 'Register already exists'}), 400
+        
+        # Create register
+        Database.execute("""
+            INSERT INTO registers 
+            (register_number, name, description, write_only, read_register, value_type, type, min_value, max_value, category, group_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            register_number,
+            data.get('name', f'Register {register_number}'),
+            data.get('description', ''),
+            data.get('write_only', 0),
+            data.get('read_register'),
+            data.get('value_type', 'decimal'),
+            data.get('type', 0),
+            data.get('min_value'),
+            data.get('max_value'),
+            data.get('category', 'other'),
+            data.get('group_id', 1)  # Default to Ungrouped
+        ))
+        
+        # Create register value
+        Database.execute("""
+            INSERT INTO register_values (register_number, current_value)
+            VALUES (?, ?)
+        """, (register_number, data.get('current_value', 0)))
+        
+        return jsonify({'success': True, 'message': 'Register created', 'register_number': register_number}), 201
+    
+    except Exception as e:
+        logger.error(f"Error creating register: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @app.route('/api/schedules', methods=['GET', 'POST'])
@@ -471,10 +855,9 @@ def manage_schedules():
         rows = Database.fetch_all("""
             SELECT s.*, 
                    (SELECT COUNT(*) FROM execution_logs WHERE schedule_id = s.id) as execution_count,
-                   (SELECT COUNT(*) FROM execution_logs WHERE schedule_id = s.id AND success = 1) as success_count,
-                   (SELECT COUNT(*) FROM schedules WHERE parent_schedule_id = s.id) as child_count
+                   (SELECT COUNT(*) FROM execution_logs WHERE schedule_id = s.id AND success = 1) as success_count
             FROM schedules s
-            ORDER BY s.parent_schedule_id ASC, s.execution_order ASC, s.created_at DESC
+            ORDER BY s.created_at DESC
         """)
         schedules = [dict(row) for row in rows]
         
@@ -498,9 +881,8 @@ def manage_schedules():
                 multiregister_start, multiregister_end, multiregister_value,
                 template_name, custom_command,
                 condition_type, condition_register, condition_operator, condition_value,
-                enabled, pushover_enabled, inverter_serial,
-                parent_schedule_id, execution_order, continue_on_parent_failure
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                enabled, pushover_enabled, inverter_serial
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             data['name'], data.get('description'), data['schedule_type'], data['time'],
             days_of_week, data.get('specific_date'),
@@ -508,15 +890,13 @@ def manage_schedules():
             data.get('multiregister_start'), data.get('multiregister_end'), data.get('multiregister_value'),
             data.get('template_name'), data.get('custom_command'),
             data.get('condition_type', 'none'), data.get('condition_register'), data.get('condition_operator'), data.get('condition_value'),
-            data.get('enabled', True), data.get('pushover_enabled', True), data.get('inverter_serial'),
-            data.get('parent_schedule_id'), data.get('execution_order', 0), data.get('continue_on_parent_failure', False)
+            data.get('enabled', True), data.get('pushover_enabled', True), data.get('inverter_serial')
         ))
         
         schedule_id = cursor.lastrowid
         
-        # Only add root schedules to APScheduler (children are executed by parents)
-        if not data.get('parent_schedule_id'):
-            add_schedule_to_apscheduler(schedule_id)
+        # Add to scheduler
+        add_schedule_to_apscheduler(schedule_id)
         
         return jsonify({'success': True, 'id': schedule_id, 'message': 'Schedule created'}), 201
 
@@ -539,11 +919,6 @@ def manage_schedule(schedule_id):
         data = request.json
         days_of_week = json.dumps(data.get('days_of_week')) if data.get('days_of_week') else None
         
-        # Get old parent_schedule_id to check if it changed
-        old_schedule = Database.fetch_one("SELECT parent_schedule_id FROM schedules WHERE id = ?", (schedule_id,))
-        old_parent_id = old_schedule['parent_schedule_id'] if old_schedule else None
-        new_parent_id = data.get('parent_schedule_id')
-        
         Database.execute("""
             UPDATE schedules SET
                 name = ?, description = ?, schedule_type = ?, time = ?, days_of_week = ?, specific_date = ?,
@@ -552,7 +927,6 @@ def manage_schedule(schedule_id):
                 template_name = ?, custom_command = ?,
                 condition_type = ?, condition_register = ?, condition_operator = ?, condition_value = ?,
                 enabled = ?, pushover_enabled = ?, inverter_serial = ?,
-                parent_schedule_id = ?, execution_order = ?, continue_on_parent_failure = ?,
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
         """, (
@@ -563,89 +937,37 @@ def manage_schedule(schedule_id):
             data.get('template_name'), data.get('custom_command'),
             data.get('condition_type', 'none'), data.get('condition_register'), data.get('condition_operator'), data.get('condition_value'),
             data.get('enabled', True), data.get('pushover_enabled', True), data.get('inverter_serial'),
-            new_parent_id, data.get('execution_order', 0), data.get('continue_on_parent_failure', False),
             schedule_id
         ))
         
-        # Handle scheduler job management
-        # If changing from root to child or vice versa, update APScheduler
-        try:
-            scheduler.remove_job(f"schedule_{schedule_id}", jobstore='default')
-        except:
-            pass
-        
-        # Only add to APScheduler if it's a root schedule (no parent)
-        if not new_parent_id:
-            add_schedule_to_apscheduler(schedule_id)
+        # Remove and re-add to scheduler
+        scheduler.remove_job(f"schedule_{schedule_id}", jobstore='default')
+        add_schedule_to_apscheduler(schedule_id)
         
         return jsonify({'success': True, 'message': 'Schedule updated'})
     
     elif request.method == 'DELETE':
-        # First, find all child schedules
-        children = Database.fetch_all(
-            "SELECT id FROM schedules WHERE parent_schedule_id = ?",
-            (schedule_id,)
-        )
-        
-        # Remove parent from scheduler
+        # Remove from scheduler
         try:
             scheduler.remove_job(f"schedule_{schedule_id}", jobstore='default')
         except:
             pass
         
-        # Delete all children (which may have their own children - recursive)
-        for child in children:
-            try:
-                scheduler.remove_job(f"schedule_{child['id']}", jobstore='default')
-            except:
-                pass
-            Database.execute("DELETE FROM schedules WHERE id = ?", (child['id'],))
-        
-        # Delete parent from database
+        # Delete from database
         Database.execute("DELETE FROM schedules WHERE id = ?", (schedule_id,))
         
-        deleted_count = len(children) + 1
-        message = f"Schedule deleted" + (f" (including {len(children)} child schedule(s))" if children else "")
-        
-        return jsonify({'success': True, 'message': message, 'deleted_count': deleted_count})
+        return jsonify({'success': True, 'message': 'Schedule deleted'})
 
 
 @app.route('/api/schedules/<int:schedule_id>/execute', methods=['POST'])
 def execute_schedule_now(schedule_id):
     """Manually execute a schedule immediately"""
     try:
-        execution_log_id, success = ScheduleExecutor.execute_schedule(schedule_id)
-        return jsonify({
-            'success': True, 
-            'message': 'Schedule executed',
-            'execution_log_id': execution_log_id,
-            'execution_success': success
-        })
+        ScheduleExecutor.execute_schedule(schedule_id)
+        return jsonify({'success': True, 'message': 'Schedule executed'})
     except Exception as e:
         logger.error(f"Error executing schedule {schedule_id}: {str(e)}")
         return jsonify({'success': False, 'error': str(e)}), 500
-
-
-@app.route('/api/schedules/<int:schedule_id>/children', methods=['GET'])
-def get_schedule_children(schedule_id):
-    """Get all child schedules for a given parent schedule"""
-    children = Database.fetch_all("""
-        SELECT s.*,
-               (SELECT COUNT(*) FROM execution_logs WHERE schedule_id = s.id) as execution_count,
-               (SELECT COUNT(*) FROM execution_logs WHERE schedule_id = s.id AND success = 1) as success_count
-        FROM schedules s
-        WHERE s.parent_schedule_id = ?
-        ORDER BY s.execution_order ASC
-    """, (schedule_id,))
-    
-    schedules = [dict(row) for row in children]
-    
-    # Parse JSON fields
-    for schedule in schedules:
-        if schedule.get('days_of_week'):
-            schedule['days_of_week'] = json.loads(schedule['days_of_week'])
-    
-    return jsonify(schedules)
 
 
 @app.route('/api/logs', methods=['GET'])
@@ -793,11 +1115,7 @@ def initialize_scheduler():
     """Load all active schedules into APScheduler"""
     logger.info("Initializing scheduler...")
     
-    # Only load root schedules (those without a parent)
-    # Child schedules will be executed by their parents
-    schedules = Database.fetch_all(
-        "SELECT id FROM schedules WHERE enabled = 1 AND (parent_schedule_id IS NULL OR parent_schedule_id = 0)"
-    )
+    schedules = Database.fetch_all("SELECT id FROM schedules WHERE enabled = 1")
     for schedule in schedules:
         add_schedule_to_apscheduler(schedule['id'])
     
