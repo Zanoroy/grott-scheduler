@@ -212,6 +212,68 @@ class InverterCommand:
                             # Fall back to simple single register write
                             url = f"{base_url}?command=register&inverter={serial}&register={register_num}&value={command_data['value']}"
                             response = requests.put(url, timeout=30)
+                    
+                    # Special handling: registers 1090-1108 must be written together
+                    elif 1090 <= register_num <= 1108:
+                        logger.info(f"Register {register_num} is in range 1090-1108, using database values for multiregister write")
+                        try:
+                            # Get all register values and metadata from database
+                            register_values = {}
+                            register_metadata = {}
+                            for reg in range(1090, 1109):
+                                row = Database.fetch_one(
+                                    """SELECT rv.current_value, r.type, r.value_type 
+                                       FROM register_values rv
+                                       LEFT JOIN registers r ON rv.register_number = r.register_number
+                                       WHERE rv.register_number = ?""",
+                                    (reg,)
+                                )
+                                if row:
+                                    register_values[reg] = row['current_value'] if row['current_value'] is not None else 0
+                                    register_metadata[reg] = {'type': row['type'], 'value_type': row['value_type']}
+                                else:
+                                    register_values[reg] = 0
+                                    register_metadata[reg] = {'type': 0, 'value_type': 'decimal'}
+                            
+                            # Update the target register with new value
+                            register_values[register_num] = command_data['value']
+                            
+                            # Update database with new value
+                            Database.execute(
+                                """INSERT OR REPLACE INTO register_values 
+                                   (register_number, current_value, last_updated) 
+                                   VALUES (?, ?, CURRENT_TIMESTAMP)""",
+                                (register_num, command_data['value'])
+                            )
+                            
+                            # Build hex value string for multiregister write
+                            # Handle time conversion: if type=hex (0) and value_type=time, convert HHmm to (HH*256+mm)
+                            hex_parts = []
+                            for reg in range(1090, 1109):
+                                value = int(register_values[reg])
+                                metadata = register_metadata[reg]
+                                
+                                # Convert time format if needed
+                                if metadata['type'] == 0 and metadata['value_type'] == 'time':
+                                    # Value is stored as HHmm (e.g., 1915), convert to (HH*256 + mm)
+                                    hours = value // 100
+                                    minutes = value % 100
+                                    value = (hours * 256) + minutes
+                                
+                                hex_parts.append(f"{value:04x}")
+                            
+                            hex_values = ''.join(hex_parts)
+                            
+                            logger.info(f"Writing all registers 1090-1108 with {register_num}={command_data['value']} (hex: {hex_values})")
+                            url = f"{base_url}?command=multiregister&inverter={serial}&startregister=1090&endregister=1108&value={hex_values}"
+                            response = requests.put(url, timeout=30)
+                            
+                        except Exception as e:
+                            logger.error(f"Error handling registers 1090-1108: {str(e)}")
+                            # Fall back to simple single register write
+                            url = f"{base_url}?command=register&inverter={serial}&register={register_num}&value={command_data['value']}"
+                            response = requests.put(url, timeout=30)
+                    
                     else:
                         # Normal single register write
                         url = f"{base_url}?command=register&inverter={serial}&register={register_num}&value={command_data['value']}"
@@ -448,6 +510,51 @@ class ScheduleExecutor:
 def health_check():
     """Health check endpoint"""
     return jsonify({'status': 'healthy', 'timestamp': datetime.now().isoformat()})
+
+
+@app.route('/api/restart-grott', methods=['POST'])
+def restart_grott():
+    """Restart grott and grottserver services"""
+    try:
+        import subprocess
+        
+        logger.info("Restarting grott services...")
+        
+        # Execute the restart command
+        command = "systemctl stop grottserver && systemctl stop grott && sleep 5 && systemctl start grottserver && sleep 2 && systemctl start grott"
+        result = subprocess.run(
+            command,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        
+        if result.returncode == 0:
+            logger.info("Grott services restarted successfully")
+            return jsonify({
+                'success': True,
+                'message': 'Grott services restarted successfully'
+            })
+        else:
+            logger.error(f"Failed to restart grott services: {result.stderr}")
+            return jsonify({
+                'success': False,
+                'error': f'Failed to restart services: {result.stderr}'
+            }), 500
+            
+    except subprocess.TimeoutExpired:
+        logger.error("Restart command timed out")
+        return jsonify({
+            'success': False,
+            'error': 'Restart command timed out'
+        }), 500
+    except Exception as e:
+        logger.error(f"Error restarting grott services: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 
 @app.route('/api/config', methods=['GET', 'PUT'])
@@ -1013,11 +1120,10 @@ def get_stats():
     row = Database.fetch_one("SELECT COUNT(*) as count FROM execution_logs WHERE success = 1")
     stats['successful_executions'] = row['count']
     
-    # Recent failures
+    # Recent logs (changed from recent failures to show all logs)
     rows = Database.fetch_all("""
-        SELECT schedule_name, executed_at, error_message 
+        SELECT schedule_name, executed_at, error_message, success
         FROM execution_logs 
-        WHERE success = 0 
         ORDER BY executed_at DESC 
         LIMIT 10
     """)

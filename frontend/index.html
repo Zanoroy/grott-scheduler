@@ -118,7 +118,13 @@
     <div class="container-fluid mt-4">
         <!-- Dashboard Tab -->
         <div id="dashboard-tab" class="tab-content">
-            <h2 class="mb-4">Dashboard</h2>
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h2>Dashboard</h2>
+                <button class="btn btn-warning" onclick="restartGrottServices()">
+                    <span id="restart-spinner" class="spinner-border spinner-border-sm d-none" role="status" aria-hidden="true"></span>
+                    <i class="bi bi-arrow-clockwise" id="restart-icon"></i> Restart Grott Services
+                </button>
+            </div>
             
             <!-- Statistics Cards -->
             <div class="row">
@@ -166,10 +172,10 @@
                 </div>
             </div>
             
-            <!-- Recent Failures -->
+            <!-- Recent Logs -->
             <div class="card">
                 <div class="card-header">
-                    <h5><i class="bi bi-exclamation-triangle"></i> Recent Failures</h5>
+                    <h5><i class="bi bi-list-ul"></i> Recent Logs</h5>
                 </div>
                 <div class="card-body">
                     <div id="recent-failures"></div>
@@ -995,21 +1001,29 @@
                     upcomingDiv.innerHTML = '<p class="text-muted">No upcoming schedules</p>';
                 }
                 
-                // Recent failures
+                // Recent logs (changed from recent failures)
                 const failuresDiv = document.getElementById('recent-failures');
                 if (stats.recent_failures.length > 0) {
                     failuresDiv.innerHTML = '<ul class="list-group">';
                     stats.recent_failures.forEach(f => {
+                        const statusClass = f.success ? 'success' : 'danger';
+                        const statusIcon = f.success ? 'check-circle' : 'x-circle';
                         failuresDiv.innerHTML += `
                             <li class="list-group-item">
-                                <strong>${f.schedule_name}</strong> - ${new Date(f.executed_at).toLocaleString()}
-                                <br><small class="text-danger">${f.error_message}</small>
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <i class="bi bi-${statusIcon} text-${statusClass}"></i>
+                                        <strong>${f.schedule_name}</strong> - ${new Date(f.executed_at).toLocaleString()}
+                                    </div>
+                                    <span class="badge bg-${statusClass}">${f.success ? 'Success' : 'Failed'}</span>
+                                </div>
+                                ${f.error_message ? `<small class="text-muted d-block mt-1">${f.error_message}</small>` : ''}
                             </li>
                         `;
                     });
                     failuresDiv.innerHTML += '</ul>';
                 } else {
-                    failuresDiv.innerHTML = '<p class="text-success">No recent failures!</p>';
+                    failuresDiv.innerHTML = '<p class="text-muted">No recent logs</p>';
                 }
             } catch (error) {
                 console.error('Error loading stats:', error);
@@ -1803,6 +1817,42 @@
                 // Hide spinner and enable button
                 spinner.classList.add('d-none');
                 text.textContent = 'Read';
+                btn.disabled = false;
+            }
+        }
+        
+        // Restart Grott Services
+        async function restartGrottServices() {
+            if (!confirm('Are you sure you want to restart Grott and GrottServer services? This will take about 10 seconds.')) {
+                return;
+            }
+            
+            const spinner = document.getElementById('restart-spinner');
+            const icon = document.getElementById('restart-icon');
+            const btn = event.target.closest('button');
+            
+            // Show spinner
+            spinner.classList.remove('d-none');
+            icon.classList.add('d-none');
+            btn.disabled = true;
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}/restart-grott`, {
+                    method: 'POST'
+                });
+                const result = await response.json();
+                
+                if (result.success) {
+                    alert('Grott services restarted successfully!');
+                } else {
+                    alert('Failed to restart services: ' + (result.error || 'Unknown error'));
+                }
+            } catch (error) {
+                alert('Error restarting services: ' + error);
+            } finally {
+                // Hide spinner
+                spinner.classList.add('d-none');
+                icon.classList.remove('d-none');
                 btn.disabled = false;
             }
         }
